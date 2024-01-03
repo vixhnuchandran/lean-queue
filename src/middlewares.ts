@@ -5,6 +5,7 @@ import { QueueManager } from "./queueManager"
 import { handleAppErrors } from "./error"
 import { PoolClient } from "pg"
 
+// Extend the Express Request interface to include additional properties
 declare module "express" {
   interface Request {
     requestId?: string
@@ -12,15 +13,18 @@ declare module "express" {
   }
 }
 
+// Middleware to attach a unique requestId to each incoming request
 const attachRequestId = (
   req: Request,
   res: Response,
   next: NextFunction
 ): void => {
+  // Generate a unique requestId using UUIDv4
   req.requestId = uuid4()
   next()
 }
 
+// Middleware to attach a QueueManager instance to the request
 const attachQueueManager = async (
   req: Request,
   res: Response,
@@ -38,6 +42,7 @@ const attachQueueManager = async (
   }
 }
 
+// Middleware to handle errors
 const handleErrors = (
   err: Error,
   req: Request,

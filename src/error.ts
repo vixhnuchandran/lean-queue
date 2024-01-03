@@ -5,6 +5,7 @@ import {
   ReasonPhrases as phrases,
 } from "http-status-codes"
 
+// Custom error class for errors related to queue operations
 export class QueueError extends Error {
   constructor(message: string) {
     super(message)
@@ -13,6 +14,7 @@ export class QueueError extends Error {
   }
 }
 
+// Custom error class for errors related to validation errors
 export class ValidationError extends Error {
   constructor(message: string) {
     super(message)
@@ -21,6 +23,7 @@ export class ValidationError extends Error {
   }
 }
 
+// Handles custom errors (ValidationError, QueueError)
 const handleCustomError = (
   err: Error,
   req: Request,
@@ -39,17 +42,16 @@ const handleCustomError = (
     .json({ error: phrases.INTERNAL_SERVER_ERROR })
 }
 
+// Handles unknown errors
 const handleUnknownError = (err: Error, req: Request, res: Response) => {
   logger.error(`error: ${err.message}`)
 
-  if (req.queueManager && req.queueManager.client) {
-    req.queueManager.client.release()
-  }
   return res
     .status(httpCodes.INTERNAL_SERVER_ERROR)
     .json({ error: phrases.INTERNAL_SERVER_ERROR })
 }
 
+// Main error handling middleware for the application
 export const handleAppErrors = (
   err: Error,
   req: Request,

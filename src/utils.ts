@@ -9,20 +9,28 @@ const currentTimestamp = getCurrentTimestamp()
 
 export const logger = {
   info: function (message: string, ...args: any): void {
-    console.info(`${currentTimestamp} ${"INFO"}: ${message} ${args}`)
+    console.info(
+      `${currentTimestamp} ${chalk.blueBright("[INFO]")}: ${message} ${args}`
+    )
   },
   log: function (message: string, ...args: any): void {
-    console.info(`${currentTimestamp} ${"LOG"}: ${message} ${args}`)
+    console.info(
+      `${currentTimestamp} ${chalk.green("[LOG]")}: ${message} ${args}`
+    )
   },
   trace: function (message: string, ...args: any): void {
-    console.info(`${currentTimestamp} ${"TRACE"}: ${message} ${args}`)
+    console.info(
+      `${currentTimestamp} ${"chalk.gray([TRACE])"}: ${message} ${args}`
+    )
   },
   warn: function (message: string, ...args: any): void {
     console.info(
-      `${currentTimestamp} ${chalk.yellow.bold("WARN")}: ${message} ${args}`
+      `${currentTimestamp} ${chalk.yellow("[WARN]")}: ${message} ${args}`
     )
   },
   error: function (message: string, ...args: any): void {
-    console.info(`${currentTimestamp} ${`ERROR`}: ${message} ${args}`)
+    console.info(
+      `${currentTimestamp} ${chalk.red(["ERROR"])}: ${message} ${args}`
+    )
   },
 }

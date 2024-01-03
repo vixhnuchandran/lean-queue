@@ -23,7 +23,4 @@ app.use("/", routes)
 // error handling middleware
 app.use(middlewares.handleErrors)
 
-const PORT: number = 8484
-app.listen(PORT, () => {
-  console.log(`Server connected to port number ${PORT}`)
-})
+export default app

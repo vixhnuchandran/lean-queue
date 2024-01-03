@@ -15,9 +15,7 @@ const pool: Pool = new Pool({
   max: 10,
 })
 
-pool.on("connect", () => {
-  console.log("Connected to the PostgreSQL database")
-})
+pool.on("connect", () => {})
 
 pool.on("error", (err: Error) => {
   console.error("Error connecting to the PostgreSQL database:", err.message)

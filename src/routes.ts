@@ -13,9 +13,14 @@ import { logger } from "./utils"
 
 const routes: Router = Router()
 
+// Route to create a new queue and add tasks
 routes.post(
   "/create-queue",
   async (req: Request, res: Response, next: NextFunction) => {
+    logger.log(
+      `Incoming client request for 'create-queue' with requestId ${req.requestId}`
+    )
+
     let requestBody: any
     try {
       validateRequestBody(req)
@@ -66,9 +71,14 @@ routes.post(
   }
 )
 
+// Route to add tasks to an existing queue
 routes.post(
   "/add-tasks",
   async (req: Request, res: Response, next: NextFunction) => {
+    logger.log(
+      `Incoming client request for 'add-tasks' with requestId ${req.requestId}`
+    )
+
     let requestBody: addTasksType
 
     try {
@@ -108,9 +118,14 @@ routes.post(
   }
 )
 
+// Route to get the next available task
 routes.post(
   "/get-next-available-task",
   async (req: Request, res: Response, next: NextFunction) => {
+    logger.log(
+      `Incoming worker request for 'get-next-available-task' with requestId ${req.requestId}`
+    )
+
     let requestBody: { queue: number; type: string; tags: string[] }
 
     try {
@@ -179,9 +194,13 @@ routes.post(
   }
 )
 
+// Route to submit task results
 routes.post(
   "/submit-results",
   async (req: Request, res: Response, next: NextFunction) => {
+    logger.log(
+      `Incoming worker request for 'submit-results' with requestId ${req.requestId}`
+    )
     try {
       const { id, result, error }: { id: number; result: {}; error: {} } =
         req.body
@@ -197,9 +216,14 @@ routes.post(
   }
 )
 
+// Route to get results for a specific queue
 routes.post(
   "/get-results/:queue",
   async (req: Request, res: Response, next: NextFunction) => {
+    logger.log(
+      `Incoming client request for 'get-results' with requestId ${req.requestId}`
+    )
+
     let queue: number | string
 
     try {
@@ -230,10 +254,15 @@ routes.post(
     }
   }
 )
+
+// Route to get status for a specific queue
 routes.post(
   "/status/:queue",
   async (req: Request, res: Response, next: NextFunction) => {
-    let queue: number | string
+    logger.log(
+      `Incoming client request for 'status' with requestId ${req.requestId}`
+    )
+    let queue: string | number
 
     try {
       if (!req.queueManager) {
@@ -263,9 +292,13 @@ routes.post(
   }
 )
 
+// Route to delete a specific queue
 routes.post(
   "/delete-queue/:queue",
   async (req: Request, res: Response, next: NextFunction) => {
+    logger.log(
+      `Incoming client request for 'delete-queue' with requestId ${req.requestId}`
+    )
     let queue: string | number
     try {
       if (!req.queueManager) {
@@ -289,9 +322,14 @@ routes.post(
     }
   }
 )
+
+// Route to delete everything
 routes.post(
   "/delete-everything",
   async (req: Request, res: Response, next: NextFunction) => {
+    logger.log(
+      `Incoming client request for 'delete-everything' with requestId ${req.requestId}`
+    )
     try {
       if (!req.queueManager) {
         throw new QueueError("QueueManager is not defined.")

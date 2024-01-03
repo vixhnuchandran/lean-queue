@@ -90,7 +90,10 @@ export const validateTasks = (tasks: [...Task[]]) => {
       throw new ValidationError(`tasks[${i}]: params must be an object`)
 
     if (task.params === undefined || task.params === null)
-      throw new ValidationError(`tasks[${i}]: params missing or not an object`)
+      throw new ValidationError(`tasks[${i}]: params field missing`)
+
+    if (Object.keys(task.params).length === 0)
+      throw new ValidationError(`tasks[${i}]: params is empty`)
 
     if (task.priority !== undefined && task.priority !== null) {
       if (!Number.isInteger(task.priority))
