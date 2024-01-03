@@ -2,10 +2,11 @@
   "name": "lean-queue-ts",
   "version": "1.0.0",
   "description": "",
-  "main": "./dist/app.js",
+  "main": "./dist/server.js",
   "scripts": {
-    "start": "npx nodemon main",
-    "build": "tsc -w"
+    "start": "ts-node ./src/server.ts",
+    "build": "tsc -w",
+    "test": "npx jest"
   },
   "keywords": [],
   "author": "vixhnuchandran",
@@ -15,11 +16,16 @@
     "@types/dotenv": "^8.2.0",
     "@types/express": "^4.17.21",
     "@types/http-status-codes": "^1.2.0",
+    "@types/jest": "^29.5.11",
     "@types/node": "^20.10.5",
     "@types/pg": "^8.10.9",
     "@types/pg-format": "^1.0.5",
     "@types/pg-pool": "^2.0.6",
+    "@types/supertest": "^6.0.2",
     "@types/uuid": "^9.0.7",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "ts-jest": "^29.1.1",
     "typescript": "^5.3.3"
   },
   "dependencies": {
