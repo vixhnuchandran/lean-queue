@@ -1,7 +1,7 @@
 import { QueryResult } from "pg"
 import { QueueError, ValidationError } from "./error"
-import { QueueManager } from "./queueManager"
-import { Options, Task } from "./types"
+import { QueryManager } from "./QueryManager"
+import { QueueOptions, Task } from "./types"
 
 // Validates request body.
 export const validateRequestBody = (req: any): void => {
@@ -21,17 +21,17 @@ export const validateQueueType = (type: string): void => {
 // Validates queueId.
 export const validateQueueId = async (
   queueId: number,
-  queueManager: QueueManager
+  queryManager: QueryManager
 ): Promise<void> => {
   if (!Number.isInteger(queueId) || queueId <= 0)
     throw new ValidationError(`invalid queue id`)
 
-  if (!(await doesQueueExist(queueManager, queueId)))
+  if (!(await doesQueueExist(queryManager, queueId)))
     throw new QueueError(`queue id does not exist`)
 }
 
 // Validates options
-export const validateOptions = (options: Options) => {
+export const validateOptions = (options: QueueOptions) => {
   const urlRegex = /^(https?|http):\/\/[^\s/$.?#].[^\s]*$/
 
   const expiryTime: number | undefined = options.expiryTime
@@ -47,17 +47,19 @@ export const validateOptions = (options: Options) => {
   if (!urlRegex.test(options.callback)) {
     throw new ValidationError(`invalid 'callback url' format`)
   }
-
-  if ((expiryTime && !Number.isInteger(expiryTime)) || expiryTime <= 0) {
-    throw new ValidationError(`invalid 'expiryTime'`)
+  if (expiryTime !== undefined) {
+    if (!Number.isInteger(expiryTime)) {
+      throw new ValidationError(`invalid 'expiryTime'`)
+    } else if (expiryTime <= 0) {
+      throw new ValidationError(`invalid 'expiryTime'`)
+    }
   }
-
   return true
 }
 
 // Check if queue exists in database.
 export const doesQueueExist = async (
-  queueManager: QueueManager,
+  queryManager: QueryManager,
   queueId: number
 ): Promise<boolean> => {
   const queryStr: string = `
@@ -65,7 +67,7 @@ export const doesQueueExist = async (
   (SELECT 1 FROM queues WHERE id = $1);
   `
 
-  const response: QueryResult = await queueManager.client.query(queryStr, [
+  const response: QueryResult = await queryManager.client.query(queryStr, [
     queueId,
   ])
 
@@ -75,29 +77,56 @@ export const doesQueueExist = async (
 }
 
 // Validates an array of tasks.
-export const validateTasks = (tasks: [...Task[]]) => {
+export const validateTasks = (tasks: Task[]) => {
+  if (tasks.length === 0) {
+    throw new ValidationError(`tasks are empty`)
+  }
+
   tasks.forEach((task, i) => {
-    if (typeof task !== "object")
-      throw new ValidationError(`tasks[${i}]: not an object`)
-
-    if (Object.keys(task).length === 0)
-      throw new ValidationError(`tasks[${i}]: is empty`)
-
-    if (task.taskId === undefined || task.taskId === null)
-      throw new ValidationError(`tasks[${i}]: taskId missing`)
-
-    if (typeof task.params !== "object")
-      throw new ValidationError(`tasks[${i}]: params must be an object`)
-
-    if (task.params === undefined || task.params === null)
-      throw new ValidationError(`tasks[${i}]: params field missing`)
-
-    if (Object.keys(task.params).length === 0)
-      throw new ValidationError(`tasks[${i}]: params is empty`)
-
-    if (task.priority !== undefined && task.priority !== null) {
-      if (!Number.isInteger(task.priority))
-        throw new ValidationError(`tasks[${i}]: priority not an integer`)
-    }
+    validateObject(task, i)
+    validateProperty(task.taskId, `taskId`, i)
+    validateParams(task.params, i)
+    validatePriority(task.priority, i)
   })
+}
+
+const validateObject = (task: Task, index: number) => {
+  if (typeof task !== "object") {
+    throw new ValidationError(`tasks[${index}]: not an object`)
+  }
+
+  if (Object.keys(task).length === 0) {
+    throw new ValidationError(`tasks[${index}]: is empty`)
+  }
+}
+
+const validateProperty = (
+  property: any,
+  propertyName: string,
+  index: number
+) => {
+  if (property === undefined || property === null) {
+    throw new ValidationError(`tasks[${index}]: ${propertyName} missing`)
+  }
+}
+
+const validateParams = (params: any, index: number) => {
+  validateProperty(params, "params", index)
+
+  if (typeof params !== "object") {
+    throw new ValidationError(`tasks[${index}]: params must be an object`)
+  }
+
+  if (Object.keys(params).length === 0) {
+    throw new ValidationError(`tasks[${index}]: params are empty`)
+  }
+}
+
+const validatePriority = (priority: any, index: number) => {
+  if (priority !== undefined) {
+    if (!Number.isInteger(priority))
+      throw new ValidationError(`tasks[${index}]: priority not an integer`)
+    else if (priority <= 0)
+      throw new ValidationError(`tasks[${index}]: invalid 'priority'`)
+  }
 }
