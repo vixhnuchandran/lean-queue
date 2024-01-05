@@ -1,4 +1,39 @@
 import chalk from "chalk"
+import path from "path"
+import { createLogger, transports, format } from "winston"
+
+// logger using winston
+// levels: {
+//   silly: 0,
+//   debug: 1,
+//   verbose: 2,
+//   info: 3,
+//   warn: 4,
+//   error: 5,
+// },
+const wLogger = createLogger({
+  transports: [
+    new transports.Console(),
+    new transports.File({
+      filename: path.join(__dirname, "../..", "logs", "app.log"),
+      level: "info",
+      format: format.combine(format.timestamp(), format.json()),
+    }),
+    // error logs
+    new transports.File({
+      filename: path.join(__dirname, "../..", "logs", "error.log"),
+      level: "error",
+
+      format: format.combine(
+        format.timestamp(),
+        format.json(),
+        format.printf(({ level, message, timestamp, requestId }) => {
+          return `${timestamp} [${level.toUpperCase()}] [ requestId: ${requestId}]: ${message}`
+        })
+      ),
+    }),
+  ],
+})
 
 const getCurrentTimestamp = (): string => {
   const now: Date = new Date()
@@ -7,7 +42,7 @@ const getCurrentTimestamp = (): string => {
 }
 const currentTimestamp = getCurrentTimestamp()
 
-export const logger = {
+const logger = {
   info: function (message: string, ...args: any): void {
     console.info(
       `${currentTimestamp} ${chalk.blueBright("[INFO]")}: ${message} ${args}`
@@ -34,3 +69,5 @@ export const logger = {
     )
   },
 }
+
+export { logger, wLogger }
