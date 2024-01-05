@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import { v4 as uuid4 } from "uuid"
 import { pool } from "./database"
-import { QueueManager } from "./queueManager"
+import { QueryManager } from "./QueryManager"
 import { handleAppErrors } from "./error"
 import { PoolClient } from "pg"
 
@@ -9,7 +9,7 @@ import { PoolClient } from "pg"
 declare module "express" {
   interface Request {
     requestId?: string
-    queueManager?: QueueManager
+    queryManager?: QueryManager
   }
 }
 
@@ -24,8 +24,8 @@ const attachRequestId = (
   next()
 }
 
-// Middleware to attach a QueueManager instance to the request
-const attachQueueManager = async (
+// Middleware to attach a QueryManager instance to the request
+const attachQueryManager = async (
   req: Request,
   res: Response,
   next: NextFunction
@@ -33,10 +33,10 @@ const attachQueueManager = async (
   const client: PoolClient = await pool.connect()
 
   try {
-    req.queueManager = new QueueManager(client)
-    await next()
+    req.queryManager = new QueryManager(client)
+    next()
   } catch (err) {
-    console.error("Error in attachQueueManager middleware:", err)
+    console.error("Error in attachQueryManager middleware:", err)
   } finally {
     client.release()
   }
@@ -56,4 +56,4 @@ const handleErrors = (
   }
 }
 
-export { attachRequestId, attachQueueManager, handleErrors }
+export { attachRequestId, attachQueryManager, handleErrors }
