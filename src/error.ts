@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express"
-import { logger } from "./utils"
+import { logger, wLogger } from "./utils/logger"
 import {
   StatusCodes as httpCodes,
   ReasonPhrases as phrases,
