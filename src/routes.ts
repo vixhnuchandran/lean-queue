@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, Router } from "express"
 import { StatusCodes as httpCodes } from "http-status-codes"
-import { addTasksType, createQueueType } from "./types"
+import { AddTasksType, CreateQueueType } from "./types"
 import {
   validateRequestBody,
   validateQueueType,
@@ -9,7 +9,7 @@ import {
   validateTasks,
 } from "./validations"
 import { QueueError, ValidationError } from "./error"
-import { logger } from "./utils"
+import { logger, wLogger } from "./utils/logger"
 
 const routes: Router = Router()
 
@@ -17,28 +17,29 @@ const routes: Router = Router()
 routes.post(
   "/create-queue",
   async (req: Request, res: Response, next: NextFunction) => {
-    logger.log(
-      `Incoming client request for 'create-queue' with requestId ${req.requestId}`
+    const requestId = req.requestId
+    wLogger.info(
+      `Incoming client request for 'create-queue' with requestId ${requestId}`
     )
 
     let requestBody: any
     try {
       validateRequestBody(req)
       requestBody = req.body
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
-      const { type, tasks, options }: createQueueType = requestBody
+      const { type, tasks, options }: CreateQueueType = requestBody
 
-      if (!type) throw new ValidationError("type is required.")
+      if (!type) throw new ValidationError("type is required")
       validateQueueType(type)
 
-      if (!tasks) throw new ValidationError("tasks are required.")
+      if (!tasks) throw new ValidationError("tasks are required")
       validateTasks(tasks)
 
       if (options) validateOptions(options)
     } catch (err: any) {
-      logger.error(`Error in create-queue: ${err.message}`)
+      wLogger.error({ message: err.message, requestId })
       return next(err)
     }
 
@@ -46,7 +47,7 @@ routes.post(
       const { type, tasks, options, tags } = requestBody
 
       const result: { queue: number; numTasks: number } | null =
-        await req.queueManager.createQueueAndAddTasks(
+        await req.queryManager.createQueueAndAddTasks(
           type,
           tasks,
           tags,
@@ -56,7 +57,7 @@ routes.post(
       if (result === null || !result.queue || !result.numTasks) {
         return res
           .status(httpCodes.INTERNAL_SERVER_ERROR)
-          .json({ error: "failed to create queue." })
+          .json({ error: "failed to create queue" })
       }
 
       const { queue, numTasks } = result
@@ -75,44 +76,43 @@ routes.post(
 routes.post(
   "/add-tasks",
   async (req: Request, res: Response, next: NextFunction) => {
-    logger.log(
+    wLogger.info(
       `Incoming client request for 'add-tasks' with requestId ${req.requestId}`
     )
 
-    let requestBody: addTasksType
+    let requestBody: AddTasksType
 
     try {
       validateRequestBody(req)
 
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
+
       requestBody = req.body
 
-      const { queue, tasks, options }: addTasksType = requestBody
+      const { queue, tasks }: AddTasksType = requestBody
 
-      if (!queue) throw new ValidationError("queue is required.")
-      await validateQueueId(queue, req.queueManager)
+      if (!queue) throw new ValidationError("queue is required")
+      await validateQueueId(queue, req.queryManager)
 
-      if (!tasks) throw new ValidationError("tasks are required.")
+      if (!tasks) throw new ValidationError("tasks are required")
       validateTasks(tasks)
-
-      if (options) validateOptions(options)
     } catch (err: any) {
       return next(err)
     }
 
     try {
-      const { queue, tasks, options } = requestBody
+      const { queue, tasks } = requestBody
 
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
-      const numTasks = await req.queueManager.addTasks(queue, tasks, options)
+      const numTasks = await req.queryManager.addTasks(queue, tasks)
 
       return res.json({ numTasks })
     } catch (err: any) {
-      console.log("add-tasks-error: ", err.message)
+      logger.error("add-tasks-error: ", err.message)
       return next(err)
     }
   }
@@ -122,7 +122,7 @@ routes.post(
 routes.post(
   "/get-next-available-task",
   async (req: Request, res: Response, next: NextFunction) => {
-    logger.log(
+    wLogger.info(
       `Incoming worker request for 'get-next-available-task' with requestId ${req.requestId}`
     )
 
@@ -131,8 +131,8 @@ routes.post(
     try {
       validateRequestBody(req)
 
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
       requestBody = req.body
 
@@ -147,7 +147,7 @@ routes.post(
           "either queue, type or tags must be specified"
         )
 
-      if (queue) await validateQueueId(queue, req.queueManager)
+      if (queue) await validateQueueId(queue, req.queryManager)
 
       if (type) validateQueueType(type)
     } catch (err: any) {
@@ -166,15 +166,15 @@ routes.post(
       }: { queue: number; type: string; tags: string[] } = requestBody
 
       if (queue)
-        nextAvailableTask = await req.queueManager.getNextAvailableTaskByQueue(
+        nextAvailableTask = await req.queryManager.getNextAvailableTaskByQueue(
           queue
         )
       else if (type)
-        nextAvailableTask = await req.queueManager.getNextAvailableTaskByType(
+        nextAvailableTask = await req.queryManager.getNextAvailableTaskByType(
           type
         )
       else if (tags)
-        nextAvailableTask = await req.queueManager.getNextAvailableTaskByTags(
+        nextAvailableTask = await req.queryManager.getNextAvailableTaskByTags(
           tags
         )
 
@@ -198,16 +198,16 @@ routes.post(
 routes.post(
   "/submit-results",
   async (req: Request, res: Response, next: NextFunction) => {
-    logger.log(
+    wLogger.info(
       `Incoming worker request for 'submit-results' with requestId ${req.requestId}`
     )
     try {
       const { id, result, error }: { id: number; result: {}; error: {} } =
         req.body
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
-      await req.queueManager.submitResults(id, result, error)
+      await req.queryManager.submitResults(id, result, error)
 
       return res.sendStatus(httpCodes.OK)
     } catch (err: any) {
@@ -220,27 +220,27 @@ routes.post(
 routes.post(
   "/get-results/:queue",
   async (req: Request, res: Response, next: NextFunction) => {
-    logger.log(
+    wLogger.info(
       `Incoming client request for 'get-results' with requestId ${req.requestId}`
     )
 
     let queue: number | string
 
     try {
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
       if (!req.params.queue) throw new ValidationError("missing queue")
 
       queue = req.params.queue
 
-      await validateQueueId(parseInt(queue), req.queueManager)
+      await validateQueueId(parseInt(queue), req.queryManager)
     } catch (err: any) {
       return next(err)
     }
 
     try {
-      const response = await req.queueManager.getResults(parseInt(queue))
+      const response = await req.queryManager.getResults(parseInt(queue))
 
       if (response && Object.keys(response.results).length === 0) {
         return res
@@ -259,27 +259,27 @@ routes.post(
 routes.post(
   "/status/:queue",
   async (req: Request, res: Response, next: NextFunction) => {
-    logger.log(
+    wLogger.info(
       `Incoming client request for 'status' with requestId ${req.requestId}`
     )
     let queue: string | number
 
     try {
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
       if (!req.params.queue) throw new ValidationError("missing queue")
 
       queue = req.params.queue
 
-      await validateQueueId(parseInt(queue), req.queueManager)
+      await validateQueueId(parseInt(queue), req.queryManager)
     } catch (err: any) {
       return next(err)
     }
 
     try {
       const { total_jobs, completed_count, error_count } =
-        await req.queueManager.getStatus(parseInt(queue, 10))
+        await req.queryManager.getStatus(parseInt(queue, 10))
 
       return res.status(httpCodes.OK).json({
         totalTasks: total_jobs,
@@ -296,25 +296,25 @@ routes.post(
 routes.post(
   "/delete-queue/:queue",
   async (req: Request, res: Response, next: NextFunction) => {
-    logger.log(
+    wLogger.info(
       `Incoming client request for 'delete-queue' with requestId ${req.requestId}`
     )
     let queue: string | number
     try {
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
       if (!req.params.queue) throw new ValidationError("missing queue")
 
       queue = req.params.queue
 
-      await validateQueueId(parseInt(queue), req.queueManager)
+      await validateQueueId(parseInt(queue), req.queryManager)
     } catch (err: any) {
       return next(err)
     }
 
     try {
-      await req.queueManager.deleteQueue(parseInt(queue))
+      await req.queryManager.deleteQueue(parseInt(queue))
 
       return res.sendStatus(httpCodes.OK)
     } catch (err: any) {
@@ -327,14 +327,14 @@ routes.post(
 routes.post(
   "/delete-everything",
   async (req: Request, res: Response, next: NextFunction) => {
-    logger.log(
+    wLogger.info(
       `Incoming client request for 'delete-everything' with requestId ${req.requestId}`
     )
     try {
-      if (!req.queueManager) {
-        throw new QueueError("QueueManager is not defined.")
+      if (!req.queryManager) {
+        throw new QueueError("QueryManager is not defined")
       }
-      await req.queueManager?.deleteEverything()
+      await req.queryManager?.deleteEverything()
 
       return res.sendStatus(httpCodes.OK)
     } catch (err: any) {
