@@ -12,7 +12,7 @@ app.use(express.json({ limit: "50mb" }))
 
 app.use(middlewares.attachRequestId)
 
-app.use(middlewares.attachQueueManager)
+app.use(middlewares.attachQueryManager)
 
 // Routes
 app.get("/", (req: Request, res: Response) => {
