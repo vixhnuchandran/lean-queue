@@ -9,21 +9,20 @@ export type Task = {
   priority?: number
 }
 
-export type createQueueType = {
+export type CreateQueueType = {
   type: string
-  tasks: [...Task[]]
+  tasks: Task[]
   tags?: string[]
-  options?: Options
+  options?: QueueOptions
 }
 
-export type addTasksType = {
+export type AddTasksType = {
   queue: number
-  tasks: [...Task[]]
-  tags?: string[] | undefined
-  options?: Options | undefined
+  tasks: Task[]
+  tags?: string[]
 }
 
-export type Options = {
+export type QueueOptions = {
   expiryTime: number
   callback: string
 }
