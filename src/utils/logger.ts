@@ -1,73 +1,34 @@
-import chalk from "chalk"
 import path from "path"
 import { createLogger, transports, format } from "winston"
 
-// logger using winston
-// levels: {
-//   silly: 0,
-//   debug: 1,
-//   verbose: 2,
-//   info: 3,
-//   warn: 4,
-//   error: 5,
-// },
-const wLogger = createLogger({
+// Logger using winston
+export const logger = createLogger({
+  level: "info",
+  format: format.combine(
+    format.timestamp({ format: "DD-MM-YYYYTHH:mm:ssZ" }),
+    format.json(),
+    format.printf(({ level, message, timestamp }) => {
+      return `${timestamp} [${level.toUpperCase()}]: ${message}`
+    })
+  ),
+
   transports: [
     new transports.Console(),
+    // File transport for app logs
     new transports.File({
       filename: path.join(__dirname, "../..", "logs", "app.log"),
-      level: "info",
-      format: format.combine(format.timestamp(), format.json()),
     }),
-    // error logs
+    // File transport for error logs
     new transports.File({
       filename: path.join(__dirname, "../..", "logs", "error.log"),
       level: "error",
-
-      format: format.combine(
-        format.timestamp(),
-        format.json(),
-        format.printf(({ level, message, timestamp, requestId }) => {
-          return `${timestamp} [${level.toUpperCase()}] [ requestId: ${requestId}]: ${message}`
-        })
+      format: format.printf(
+        ({ level, message, timestamp, requestId, errorCode }) => {
+          const requestIdText = requestId ? `[requestId: ${requestId}]` : ""
+          const errorCodeText = errorCode ? `[code: ${errorCode}]` : ""
+          return `${timestamp} [${level.toUpperCase()}] ${requestIdText} ${errorCodeText}:  ${message}`
+        }
       ),
     }),
   ],
 })
-
-const getCurrentTimestamp = (): string => {
-  const now: Date = new Date()
-  const timestamp: string = `[${now.toLocaleDateString()}]`
-  return timestamp
-}
-const currentTimestamp = getCurrentTimestamp()
-
-const logger = {
-  info: function (message: string, ...args: any): void {
-    console.info(
-      `${currentTimestamp} ${chalk.blueBright("[INFO]")}: ${message} ${args}`
-    )
-  },
-  log: function (message: string, ...args: any): void {
-    console.info(
-      `${currentTimestamp} ${chalk.green("[LOG]")}: ${message} ${args}`
-    )
-  },
-  trace: function (message: string, ...args: any): void {
-    console.info(
-      `${currentTimestamp} ${"chalk.gray([TRACE])"}: ${message} ${args}`
-    )
-  },
-  warn: function (message: string, ...args: any): void {
-    console.info(
-      `${currentTimestamp} ${chalk.yellow("[WARN]")}: ${message} ${args}`
-    )
-  },
-  error: function (message: string, ...args: any): void {
-    console.info(
-      `${currentTimestamp} ${chalk.red(["ERROR"])}: ${message} ${args}`
-    )
-  },
-}
-
-export { logger, wLogger }
