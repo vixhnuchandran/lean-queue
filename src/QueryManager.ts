@@ -1,12 +1,22 @@
 import { PoolClient, QueryResult } from "pg"
 import format from "pg-format"
 import { QueueOptions, Task } from "./types"
-import { logger, wLogger } from "./utils/logger"
+import { logger } from "./utils/logger"
 
 export class QueryManager {
   client
   constructor(client: PoolClient) {
     this.client = client
+  }
+
+  async getExpiryTime(queue: number) {
+    const queryStr: string = `
+    SELECT options->>'expiryTime'
+    FROM queues
+    WHERE id = $1;
+    `
+    const result: QueryResult<any> = await this.client.query(queryStr, [queue])
+    return parseInt(result.rows[0]["?column?"])
   }
 
   async createQueue(
@@ -33,7 +43,7 @@ export class QueryManager {
 
       return queue.rows[0].id
     } catch (err: any) {
-      logger.error(`'createQueue' ${err.message}`)
+      logger.error({ message: `'createQueue' ${err.message}` })
       return null
     }
   }
@@ -53,13 +63,17 @@ export class QueryManager {
         await this.client.query("BEGIN")
         numTasks = await this.addTasks(queue, tasks, options)
       } else {
-        logger.error("createQueue operation did not return a valid queue.")
+        logger.error({
+          message: "createQueue operation did not return a valid queue.",
+        })
       }
       return { queue, numTasks }
     } catch (err: any) {
       await this.deleteQueue(queue)
       await this.client.query("ROLLBACK")
-      logger.error(`error in 'createQueueAndAddTasks': ${err.message}`)
+      logger.error({
+        message: `error in 'createQueueAndAddTasks': ${err.message}`,
+      })
       return null
     }
   }
@@ -76,6 +90,16 @@ export class QueryManager {
 
       let successfulBatches: number = 0
 
+      const currentTime: Date = new Date()
+      let expiryTime: Date
+      if (options && options.expiryTime !== undefined) {
+        expiryTime = new Date(currentTime.getTime() + options.expiryTime)
+      } else {
+        const expiryTimeFromDb =
+          (await this.getExpiryTime(queue)) || 2 * 60 * 1000 // 2min default
+        expiryTime = new Date(currentTime.getTime() + expiryTimeFromDb)
+      }
+
       await this.client.query("BEGIN")
       for (let i = 0; i < totalBatches; i++) {
         const batchStart: number = i * batchSize
@@ -84,14 +108,8 @@ export class QueryManager {
           .slice(batchStart, batchEnd)
           .map(([_, data]: any[]) => {
             const taskParams = options
-              ? [
-                  data.taskId,
-                  data.params,
-                  data.priority,
-                  options.expiryTime,
-                  queue,
-                ]
-              : [data.taskId, data.params, data.priority, queue]
+              ? [data.taskId, data.params, data.priority, expiryTime, queue]
+              : [data.taskId, data.params, data.priority, expiryTime, queue]
             return taskParams
           })
 
@@ -104,7 +122,9 @@ export class QueryManager {
         } catch (err: any) {
           await this.client.query("ROLLBACK")
 
-          logger.error(`Error adding batch ${i + 1}: ${err.message}`)
+          logger.error({
+            message: `Error adding batch ${i + 1}: ${err.message}`,
+          })
 
           return
         }
@@ -114,7 +134,7 @@ export class QueryManager {
       else return 0
     } catch (err: any) {
       await this.deleteQueue(queue)
-      logger.error(`error in 'addTasks': ${err.message}`)
+      logger.error({ message: `error in 'addTasks': ${err.message}` })
       return
     }
   }
@@ -124,15 +144,13 @@ export class QueryManager {
         // add-tasks,
 
         const queryStr: string = `
-          INSERT INTO tasks (task_id, params, priority , ${
-            batch[0]?.length === 5 ? "expiry_time, " : ""
-          } queue_id) 
+          INSERT INTO tasks (task_id, params, priority ,expiry_time, queue_id) 
           VALUES %L
         `
         await this.client.query(format(queryStr, batch))
       }
     } catch (err: any) {
-      logger.error(`error in 'addTasksByBatch': ${err.message}`)
+      logger.error({ message: `error in 'addTasksByBatch': ${err.message}` })
     }
   }
 
@@ -144,7 +162,7 @@ export class QueryManager {
         `
       await this.client.query(queryStr)
     } catch (err: any) {
-      logger.error(`error in 'deleteQueue': ${err.message}`)
+      logger.error({ message: `error in 'deleteQueue': ${err.message}` })
     }
   }
 
@@ -154,9 +172,9 @@ export class QueryManager {
       TRUNCATE TABLE tasks, queues RESTART IDENTITY
         `
       await this.client.query(queryStr)
-      logger.log("Deleted everything successfully")
+      logger.info("Deleted everything successfully")
     } catch (err: any) {
-      logger.error(`error in 'deleteEverything': ${err.message}`)
+      logger.error({ message: `error in 'deleteEverything': ${err.message}` })
     }
   }
 
@@ -202,7 +220,7 @@ export class QueryManager {
       return data
     } catch (err: any) {
       await this.client.query("ROLLBACK")
-      logger.error(`Error in getNextTaskByQueue: ${err.message}`)
+      logger.error({ message: `Error in getNextTaskByQueue: ${err.message}` })
       return null
     }
   }
@@ -229,7 +247,7 @@ export class QueryManager {
 
       data = result.rows[0]
       if (!data) {
-        logger.warn("No tasks available right now!")
+        logger.info("No tasks available right now!")
       } else {
         const queryStr: string = `
           UPDATE tasks SET status = 'processing', start_time =  CURRENT_TIMESTAMP
@@ -243,7 +261,7 @@ export class QueryManager {
     } catch (err: any) {
       await this.client.query("ROLLBACK")
 
-      logger.error(`Error in getNextTaskByType: ${err.message}`)
+      logger.error({ message: `Error in getNextTaskByType: ${err.message}` })
       return null
     }
   }
@@ -288,7 +306,7 @@ export class QueryManager {
     } catch (err: any) {
       await this.client.query("ROLLBACK")
 
-      logger.error(`Error in getNextTaskByTags: ${err.message}`)
+      logger.error({ message: `Error in getNextTaskByTags: ${err.message}` })
 
       return null
     }
@@ -324,7 +342,7 @@ export class QueryManager {
       const callbackUrl: string = response.rows[0].callback_url
 
       if (await this.areAllTasksCompleted(queue)) {
-        logger.log("All Tasks Finished")
+        logger.info("All Tasks Finished")
 
         const results = await this.getResults(queue)
 
@@ -337,7 +355,7 @@ export class QueryManager {
     } catch (err: any) {
       await this.client.query("ROLLBACK")
 
-      logger.error(`error in 'submitResults' : ${err.message}`)
+      logger.error({ message: `error in 'submitResults' : ${err.message}` })
     }
   }
 
@@ -356,7 +374,7 @@ export class QueryManager {
 
       return response.rows[0]
     } catch (err: any) {
-      logger.error(`error in 'getStatus': ${err.message}`)
+      logger.error({ message: `error in 'getStatus': ${err.message}` })
 
       return null
     }
@@ -378,7 +396,7 @@ export class QueryManager {
         results[row.task_id] = row.result
       })
     } catch (err: any) {
-      logger.error(`error in 'getResults': ${err.message}`)
+      logger.error({ message: `error in 'getResults': ${err.message}` })
     }
     return { results }
   }
@@ -393,7 +411,7 @@ export class QueryManager {
         body: JSON.stringify(results),
       })
     } catch (err: any) {
-      logger.error(`error in 'postResults': ${err.message}`)
+      logger.error({ message: `error in 'postResults': ${err.message}` })
     }
   }
   async areAllTasksCompleted(queue: number): Promise<boolean> {
