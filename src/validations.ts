@@ -1,21 +1,34 @@
 import { QueryResult } from "pg"
-import { QueueError, ValidationError } from "./error"
+import {
+  QueueError,
+  QueueErrorCode,
+  ValidationError,
+  ValidationErrorCode,
+} from "./error"
 import { QueryManager } from "./QueryManager"
 import { QueueOptions, Task } from "./types"
-
 // Validates request body.
 export const validateRequestBody = (req: any): void => {
   if (!req.body || Object.keys(req.body).length === 0)
-    throw new ValidationError(`empty request body`)
+    throw new ValidationError(
+      `empty request body`,
+      ValidationErrorCode.EMPTY_REQUEST_BODY
+    )
 }
 
 // Validates queue type.
 export const validateQueueType = (type: string): void => {
   if (typeof type !== "string")
-    throw new ValidationError(`type must be a string type`)
+    throw new ValidationError(
+      `'type' must be a string type`,
+      ValidationErrorCode.EMPTY_REQUEST_BODY
+    )
 
   if (!/^[a-z0-9-]+$/.test(type))
-    throw new ValidationError(`invalid 'type' format`)
+    throw new ValidationError(
+      `invalid 'type' format`,
+      ValidationErrorCode.INVALID_TYPE_FORMAT
+    )
 }
 
 // Validates queueId.
@@ -24,10 +37,16 @@ export const validateQueueId = async (
   queryManager: QueryManager
 ): Promise<void> => {
   if (!Number.isInteger(queueId) || queueId <= 0)
-    throw new ValidationError(`invalid queue id`)
+    throw new ValidationError(
+      `invalid queue id`,
+      ValidationErrorCode.INVALID_QUEUE_ID
+    )
 
   if (!(await doesQueueExist(queryManager, queueId)))
-    throw new QueueError(`queue id does not exist`)
+    throw new QueueError(
+      `queue id does not exist`,
+      QueueErrorCode.QUEUE_NOT_EXIST
+    )
 }
 
 // Validates options
@@ -37,21 +56,36 @@ export const validateOptions = (options: QueueOptions) => {
   const expiryTime: number | undefined = options.expiryTime
 
   if (typeof options !== "object") {
-    throw new ValidationError(`'options' must be an object type`)
+    throw new ValidationError(
+      `'options' must be an object type`,
+      ValidationErrorCode.OPTIONS_NOT_AN_OBJECT
+    )
   }
 
   if (typeof options.callback !== "string") {
-    throw new ValidationError(`'callback url' must be a string type`)
+    throw new ValidationError(
+      `'callback url' must be a string type`,
+      ValidationErrorCode.INVALID_CALLBACK_TYPE
+    )
   }
 
   if (!urlRegex.test(options.callback)) {
-    throw new ValidationError(`invalid 'callback url' format`)
+    throw new ValidationError(
+      `invalid 'callback url' format`,
+      ValidationErrorCode.INVALID_CALLBACK_FORMAT
+    )
   }
   if (expiryTime !== undefined) {
     if (!Number.isInteger(expiryTime)) {
-      throw new ValidationError(`invalid 'expiryTime'`)
+      throw new ValidationError(
+        `invalid 'expiryTime'`,
+        ValidationErrorCode.INVALID_EXPIRY_TIME
+      )
     } else if (expiryTime <= 0) {
-      throw new ValidationError(`invalid 'expiryTime'`)
+      throw new ValidationError(
+        `invalid 'expiryTime'`,
+        ValidationErrorCode.INVALID_EXPIRY_TIME
+      )
     }
   }
   return true
@@ -79,7 +113,10 @@ export const doesQueueExist = async (
 // Validates an array of tasks.
 export const validateTasks = (tasks: Task[]) => {
   if (tasks.length === 0) {
-    throw new ValidationError(`tasks are empty`)
+    throw new ValidationError(
+      `'tasks' are empty`,
+      ValidationErrorCode.TASK_EMPTY_OBJECT
+    )
   }
 
   tasks.forEach((task, i) => {
@@ -92,11 +129,17 @@ export const validateTasks = (tasks: Task[]) => {
 
 const validateObject = (task: Task, index: number) => {
   if (typeof task !== "object") {
-    throw new ValidationError(`tasks[${index}]: not an object`)
+    throw new ValidationError(
+      `tasks[${index}]: not an object`,
+      ValidationErrorCode.TASK_NOT_AN_OBJECT
+    )
   }
 
   if (Object.keys(task).length === 0) {
-    throw new ValidationError(`tasks[${index}]: is empty`)
+    throw new ValidationError(
+      `tasks[${index}]: is empty`,
+      ValidationErrorCode.EMPTY_TASKS
+    )
   }
 }
 
@@ -106,7 +149,10 @@ const validateProperty = (
   index: number
 ) => {
   if (property === undefined || property === null) {
-    throw new ValidationError(`tasks[${index}]: ${propertyName} missing`)
+    throw new ValidationError(
+      `tasks[${index}]: '${propertyName}' missing`,
+      ValidationErrorCode.MISSING_PROPERTY
+    )
   }
 }
 
@@ -114,19 +160,31 @@ const validateParams = (params: any, index: number) => {
   validateProperty(params, "params", index)
 
   if (typeof params !== "object") {
-    throw new ValidationError(`tasks[${index}]: params must be an object`)
+    throw new ValidationError(
+      `tasks[${index}]: 'params' must be an object`,
+      ValidationErrorCode.PARAMS_NOT_AN_OBJECT
+    )
   }
 
   if (Object.keys(params).length === 0) {
-    throw new ValidationError(`tasks[${index}]: params are empty`)
+    throw new ValidationError(
+      `tasks[${index}]: 'params' are empty`,
+      ValidationErrorCode.EMPTY_PARAMS
+    )
   }
 }
 
 const validatePriority = (priority: any, index: number) => {
   if (priority !== undefined) {
     if (!Number.isInteger(priority))
-      throw new ValidationError(`tasks[${index}]: priority not an integer`)
+      throw new ValidationError(
+        `tasks[${index}]: 'priority' not an integer`,
+        ValidationErrorCode.PRIORITY_NOT_AN_INTEGER
+      )
     else if (priority <= 0)
-      throw new ValidationError(`tasks[${index}]: invalid 'priority'`)
+      throw new ValidationError(
+        `tasks[${index}]: invalid 'priority'`,
+        ValidationErrorCode.INVALID_PRIORITY
+      )
   }
 }
