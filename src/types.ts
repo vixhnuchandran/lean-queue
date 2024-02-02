@@ -13,6 +13,7 @@ export type CreateQueueType = {
   type: string
   tasks: Task[]
   tags?: string[]
+  notes?: string
   options?: QueueOptions
 }
 
