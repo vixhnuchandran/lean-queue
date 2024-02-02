@@ -12,6 +12,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/routes/mainRoutes.ts"],
   "exclude": ["node_modules"]
 }
