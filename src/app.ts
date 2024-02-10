@@ -2,9 +2,8 @@ import express from "express"
 import { Application, Request, Response } from "express"
 import { StatusCodes } from "http-status-codes"
 import * as middlewares from "./middlewares"
-import routes from "./routes/index"
 import cors from "cors"
-
+import routes from "./routes/routes"
 const app: Application = express()
 
 // middlewares
@@ -17,9 +16,7 @@ app.use(middlewares.attachRequestId)
 app.use(middlewares.attachQueryManager)
 
 // Routes
-
-app.use("/", routes.mainRoutes)
-app.use("/", routes.dashboardRoutes)
+app.use("/", routes)
 
 app.get("/", (req: Request, res: Response) => {
   return res.sendStatus(StatusCodes.OK)
