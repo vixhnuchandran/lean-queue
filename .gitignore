@@ -4,3 +4,13 @@ dist
 .env
 pnpm-lock.yaml
 logs
+worker/__pycache__/
+worker/_worker.py
+worker/notes.txt
+notes.txt
+TODO.MD
+dashboard/.eslintrc.cjs
+dashboard/.gitignore
+dashboard/.prettierrc
+dashboard/sample.js
+lean-queue-ts.code-workspace
