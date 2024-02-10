@@ -2,7 +2,7 @@ import { PoolClient, QueryResult } from "pg"
 import format from "pg-format"
 import { QueueOptions, Task } from "./types"
 import { logger } from "./utils/logger"
-import { time } from "console"
+import { SubmitResultsResponse } from "./types"
 
 export class QueryManager {
   client
@@ -52,6 +52,7 @@ export class QueryManager {
       return null
     }
   }
+
   async createQueueAndAddTasks(
     type: string,
     tasks: Task[],
@@ -317,7 +318,11 @@ export class QueryManager {
     }
   }
 
-  async submitResults(id: number, result: {}, error: {}): Promise<void> {
+  async submitResults(
+    id: number,
+    result: {},
+    error: {}
+  ): Promise<SubmitResultsResponse | null> {
     try {
       const resultObj: {} = error ? { error } : { result }
       const queryStr: string = `
@@ -351,23 +356,15 @@ export class QueryManager {
       const queue: number = response.rows[0].queue_id
 
       await this.client.query(queryStr2, [queue])
+
       const callbackUrl: string = response.rows[0].callback_url
 
-      if (await this.areAllTasksCompleted(queue)) {
-        logger.info("All Tasks Finished")
-
-        const results = await this.getResults(queue)
-
-        if (results !== null && callbackUrl) {
-          await this.postResults(callbackUrl, results)
-        }
-      }
-
       await this.client.query("COMMIT")
+      return { queue, callbackUrl }
     } catch (err: any) {
       await this.client.query("ROLLBACK")
-
       logger.error({ message: `error in 'submitResults' : ${err.message}` })
+      return null
     }
   }
 
@@ -390,9 +387,29 @@ export class QueryManager {
     }
   }
 
-  async getResults(queue: number): Promise<{ [taskId: string]: any } | null> {
-    let results: { [taskId: string]: any } = {}
+  async checkQueue(
+    field: string,
+    value: string | number
+  ): Promise<{ id: number; type: string | null } | null> {
+    try {
+      const queryStr = `
+        SELECT id, type
+        FROM queues
+        WHERE ${field} = $1;
+      `
+      const response = await this.client.query(queryStr, [value])
+      const queueData = response.rows[0] || null
+      return queueData
+    } catch (err: any) {
+      logger.error({ message: `Error in 'checkQueue': ${err.message}` })
+      return null
+    }
+  }
 
+  async getResults(
+    queue: number | string
+  ): Promise<{ [taskId: string]: any } | null> {
+    let results: { [taskId: string]: any } = {}
     try {
       const queryStr = `
         SELECT task_id, result
@@ -448,13 +465,19 @@ export class QueryManager {
   }
 
   async totalTaskCountInQueue(queue: number): Promise<QueryResult> {
-    const queryStr: string = `
+    try {
+      const queryStr: string = `
         SELECT COUNT(*) FROM tasks 
         WHERE queue_id = ${queue}
-        `
-    const response: QueryResult = await this.client.query(queryStr)
+      `
 
-    return response
+      const response: QueryResult = await this.client.query(queryStr)
+
+      return response
+    } catch (error: any) {
+      console.error("Error querying the database:", error.message)
+      throw error
+    }
   }
 
   async completedTaskCountInQueue(queue: number): Promise<QueryResult> {
@@ -771,12 +794,6 @@ export class QueryManager {
     | number
   > {
     try {
-      const countQuery = "SELECT COUNT(*) FROM queues;"
-
-      const countResult: QueryResult = await this.client.query(countQuery)
-
-      const totalRecords = countResult.rows[0].count
-
       let queryStr = `
       SELECT
       COUNT(*) OVER () AS total_records,
@@ -804,6 +821,17 @@ export class QueryManager {
         `
 
         queryParams.push(searchTerm)
+      }
+
+      if (query.tag) {
+        const tagTerm = query.tag.trim()
+
+        queryStr += `
+          WHERE
+             $1 = ANY(q.tags)
+        `
+
+        queryParams.push(tagTerm)
       }
 
       if (query.sortBy && query.sortOrder) {
@@ -840,6 +868,13 @@ export class QueryManager {
             MAX(q.info->>'updated_at') DESC
         `
       }
+
+      const preResult: QueryResult = await this.client.query(
+        queryStr,
+        queryParams
+      )
+
+      const totalRecords = preResult.rows[0].total_records ?? 0
 
       const pageSize = parseInt(query.pageSize) || 10
       const totalPages = Math.ceil(totalRecords / pageSize)

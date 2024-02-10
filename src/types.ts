@@ -27,3 +27,8 @@ export type QueueOptions = {
   expiryTime: number
   callback: string
 }
+
+export type SubmitResultsResponse = {
+  queue: number
+  callbackUrl: string
+}
