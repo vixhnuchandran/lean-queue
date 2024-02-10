@@ -1,136 +1,142 @@
+import argparse
 import time
 import json
 import requests
 import random
-import argparse
+import sys
+import logging
+from utils import *
+
+root = "http://127.0.0.1:8484"
+state_file = "worker_state.json"
+
+logging.basicConfig(level=logging.INFO)
 
 
-# root = "https://lean-queue.vercel.app/"
-root = "http://127.0.0.1:8484/"
-
-halt_n_execute = False
-delay = random.uniform(4, 10)
+def calculate_square(tasks):
+    squared_tasks = list(map(lambda x: x ** 2, tasks))
+    return squared_tasks
 
 
-def execute_task(num1, num2, operation_type):
-    num1 = int(num1)
-    num2 = int(num2)
+def calculate_sum(tasks):
+    summed_tasks = sum(tasks)
+    return summed_tasks
 
-    if operation_type == "addition":
 
-        return num1 + num2
+def run_worker(worker_type):
+    if worker_type == "sum":
+        while True:
+            try:
+                response = get_next_task(
+                    "type", "sum")
 
-    elif operation_type == "subtraction":
+                if response:
+                    task_id = response["id"]
+                    data = response["params"]["data"]
 
-        return num1 - num2
+                    logging.info(data)
 
-    elif operation_type == "multiplication":
+                    time.sleep(0)
+                    result = calculate_sum(data)
 
-        return num1 * num2
+                    response = send_results(task_id, result, None)
 
-    elif operation_type == "division":
+                else:
+                    logging.warning("No task received from the server")
+                    time.sleep(0)
 
-        return num1 / num2
+            except Exception as error:
+                logging.error("Error in run_worker:", error)
+                sys.exit(1)
+
+    elif worker_type == "square":
+        while True:
+            try:
+                response = get_next_task(
+                    "type", "square")
+
+                if response:
+                    task_id = response["id"]
+                    data = response["params"]["data"]
+
+                    logging.info(data)
+
+                    time.sleep(0)
+                    result = calculate_square(data)
+
+                    logging.info(result)
+
+                    response = send_results(task_id, result, None)
+
+                else:
+                    logging.warning("No task received from the server")
+                    time.sleep(0)
+
+            except Exception as error:
+                logging.error("Error in run_worker:", error)
+                sys.exit(1)
+
+    elif worker_type == "squaresum":
+        while True:
+            try:
+
+                response = get_next_task("type", "squaresum")
+
+                if response:
+                    square_data = response["params"]["data"]
+                    main_task_id = response["id"]
+
+                    queue_id = create_queue(square_data, "square", tags=[
+                        "square", "dev," "localdb"])
+
+                    result = get_queue_result(queue_id)
+
+                    for value in result.values():
+                        if 'result' in value:
+                            sum_data = value['result']
+                            break
+
+                    queue_id = create_queue(sum_data, "sum", tags=[
+                        "sum", "dev," "localdb"])
+
+                    result = get_queue_result(queue_id)
+
+                    for value in result.values():
+                        if 'result' in value:
+                            final_result = value['result']
+                            break
+
+                    send_results(main_task_id, final_result, None)
+
+                else:
+                    logging.warning("No task received from the server")
+                    time.sleep(0)
+
+            except Exception as error:
+                logging.error("Error in run_worker:", error)
+                sys.exit(1)
 
     else:
-        raise ValueError("Unsupported operation type: " + operation_type)
-
-
-def get_next_task(using, value, timeout=10, retries=3):
-    for _ in range(retries):
-        try:
-            request_body = {
-                using: value,
-            }
-            if halt_n_execute:
-                input(f"\nPress 'Enter' to send req with body {request_body} ")
-
-            response = requests.post(
-                root + "get-next-available-task", json=request_body, timeout=timeout)
-
-            data = response.json()
-            return data
-
-        except requests.Timeout:
-
-            print(f"Timeout occurred. Retrying...")
-
-        except Exception as error:
-
-            print(f"Error: {error}. Retrying...")
-    return None
-
-
-def send_results(task_id, result, error):
-    try:
-        request_body = {"id": task_id, "result": result, "error": error}
-
-        if halt_n_execute:
-            input(f"Press 'Enter' to submit result with body {request_body } ")
-
-        response = requests.post(
-            root + "submit-results",
-            json=request_body,
-        )
-        return response
-    except Exception as error:
-        print("Error while sending result:", error)
-
-
-def run_worker():
-    args = parse_arguments()
-    while True:
-        try:
-
-            response = get_next_task(
-                args.using, args.value, timeout=10, retries=3)
-            time.sleep(delay)
-            if isinstance(response, dict) and "message" in response:
-                print("\nNo tasks found, worker going to sleep mode")
-                time.sleep(delay)
-                continue
-
-            print(f"Task found, details: {json.dumps(response)}")
-
-            task_id, params = response["id"], response["params"]
-            num1, num2 = params["num1"], params["num2"]
-
-            if halt_n_execute:
-                input("Press 'Enter' to execute...")
-
-            if (args.using == "type"):
-                result = execute_task(num1, num2, args.value)
-            else:
-                result = execute_task(num1, num2, response.get('type'))
-
-            print(f"Task executed successfully, Result is: {result}")
-
-            send_results(task_id, result, None)
-            print("Results submitted successfully")
-
-        except Exception as error:
-            print("Error in run_worker:", error)
-
-
-def parse_value(value):
-    try:
-        return int(value)
-    except ValueError:
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            return value
-
-
-def parse_arguments():
-    parser = argparse.ArgumentParser(
-        description="Script to run worker with different fetch types.")
-    parser.add_argument("--using", choices=["type", "queue", "tags"],
-                        required=True, help="Specify the choices (type/queue/tags).")
-    parser.add_argument("--value", type=parse_value,
-                        help="Specify the value for the fetch type.")
-    return parser.parse_args()
+        logging.error("Invalid worker type specified.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    run_worker()
+    parser = argparse.ArgumentParser(description='Run specific worker.')
+    parser.add_argument('--sum', action='store_true', help='Run sum worker.')
+    parser.add_argument('--square', action='store_true',
+                        help='Run square worker.')
+    parser.add_argument('--squaresum', action='store_true',
+                        help='Run squaresum worker.')
+
+    args = parser.parse_args()
+
+    if args.sum:
+        run_worker("sum")
+    elif args.square:
+        run_worker("square")
+    elif args.squaresum:
+        run_worker("squaresum")
+    else:
+        logging.error("No worker specified.")
+        sys.exit(1)
