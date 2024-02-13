@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkQueue = exports.taskDetails = exports.queueCounts = exports.queueDetails = exports.queuesDetails = exports.recentQueues = exports.taskStats = exports.deleteAll = exports.deleteQueue = exports.status = exports.completedResults = exports.getResults = exports.submitResults = exports.nextAvailableTask = exports.addTasks = exports.createQueue = void 0;
 const http_status_codes_1 = require("http-status-codes");
@@ -6,7 +15,7 @@ const validations_1 = require("../validations");
 const error_1 = require("../error");
 const logger_1 = require("../utils/logger");
 let connectedClients = {};
-const createQueue = async (req, res, next) => {
+const createQueue = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming client request for 'create-queue'`,
@@ -39,7 +48,7 @@ const createQueue = async (req, res, next) => {
     }
     try {
         const { type, tasks, options, tags, notes } = requestBody;
-        const result = await req.queryManager.createQueueAndAddTasks(type, tasks, tags, options, notes);
+        const result = yield req.queryManager.createQueueAndAddTasks(type, tasks, tags, options, notes);
         if (result === null || !result.queue || !result.numTasks) {
             return res
                 .status(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR)
@@ -54,9 +63,9 @@ const createQueue = async (req, res, next) => {
     catch (err) {
         return next(err.stack);
     }
-};
+});
 exports.createQueue = createQueue;
-const addTasks = async (req, res, next) => {
+const addTasks = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming client request for 'add-tasks'`,
@@ -72,7 +81,7 @@ const addTasks = async (req, res, next) => {
         const { queue, tasks } = requestBody;
         if (!queue)
             throw new error_1.ValidationError("queue is required", error_1.ValidationErrorCode.MISSING_QUEUE_ID);
-        await (0, validations_1.validateQueueId)(queue, req.queryManager);
+        yield (0, validations_1.validateQueueId)(queue, req.queryManager);
         if (!tasks)
             throw new error_1.ValidationError("tasks are required", error_1.ValidationErrorCode.EMPTY_TASKS);
         (0, validations_1.validateTasks)(tasks);
@@ -85,16 +94,16 @@ const addTasks = async (req, res, next) => {
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        const numTasks = await req.queryManager.addTasks(queue, tasks);
+        const numTasks = yield req.queryManager.addTasks(queue, tasks);
         return res.json({ numTasks });
     }
     catch (err) {
         logger_1.logger.error({ message: `add-tasks-error: ${err.message}` });
         return next(err);
     }
-};
+});
 exports.addTasks = addTasks;
-const nextAvailableTask = async (req, res, next) => {
+const nextAvailableTask = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming worker request for 'next-available-task'`,
@@ -111,7 +120,7 @@ const nextAvailableTask = async (req, res, next) => {
         if (!queue && !type && !tags)
             throw new error_1.ValidationError("either queue, type or tags must be specified", error_1.ValidationErrorCode.EMPTY_REQUEST_BODY);
         if (queue)
-            await (0, validations_1.validateQueueId)(queue, req.queryManager);
+            yield (0, validations_1.validateQueueId)(queue, req.queryManager);
         if (type)
             (0, validations_1.validateQueueType)(type);
     }
@@ -123,11 +132,11 @@ const nextAvailableTask = async (req, res, next) => {
     try {
         const { queue, type, tags, } = requestBody;
         if (queue)
-            nextAvailableTask = await req.queryManager.getNextAvailableTaskByQueue(queue);
+            nextAvailableTask = yield req.queryManager.getNextAvailableTaskByQueue(queue);
         else if (type)
-            nextAvailableTask = await req.queryManager.getNextAvailableTaskByType(type);
+            nextAvailableTask = yield req.queryManager.getNextAvailableTaskByType(type);
         else if (tags)
-            nextAvailableTask = await req.queryManager.getNextAvailableTaskByTags(tags);
+            nextAvailableTask = yield req.queryManager.getNextAvailableTaskByTags(tags);
         if (!nextAvailableTask)
             return res.status(http_status_codes_1.StatusCodes.NO_CONTENT).json({
                 message: "No available task found",
@@ -141,9 +150,9 @@ const nextAvailableTask = async (req, res, next) => {
     catch (err) {
         return next(err);
     }
-};
+});
 exports.nextAvailableTask = nextAvailableTask;
-const completedResults = async (req, res, next) => {
+const completedResults = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming client request for 'get-completed-results'`,
@@ -158,7 +167,7 @@ const completedResults = async (req, res, next) => {
             throw new error_1.ValidationError("missing queue", error_1.ValidationErrorCode.MISSING_QUEUE_ID);
         }
         queue = req.params.queue;
-        await (0, validations_1.validateQueueId)(parseInt(queue.toString(), 10), req.queryManager);
+        yield (0, validations_1.validateQueueId)(parseInt(queue.toString(), 10), req.queryManager);
         queue = queue.toString();
     }
     catch (err) {
@@ -168,13 +177,14 @@ const completedResults = async (req, res, next) => {
         if (!connectedClients[queue]) {
             connectedClients[queue] = [];
         }
-        const responsePromise = new Promise(async (resolve, reject) => {
+        const responsePromise = new Promise((resolve, reject) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a, _b;
             connectedClients[queue].push(resolve);
             try {
-                const areAllTasksCompleted = await req.queryManager?.areAllTasksCompleted(Number(queue));
+                const areAllTasksCompleted = yield ((_a = req.queryManager) === null || _a === void 0 ? void 0 : _a.areAllTasksCompleted(Number(queue)));
                 if (areAllTasksCompleted !== undefined) {
                     if (areAllTasksCompleted) {
-                        const results = await req.queryManager?.getResults(queue);
+                        const results = yield ((_b = req.queryManager) === null || _b === void 0 ? void 0 : _b.getResults(queue));
                         resolve(results || null);
                     }
                 }
@@ -182,8 +192,8 @@ const completedResults = async (req, res, next) => {
             catch (err) {
                 reject(err);
             }
-        });
-        const responseData = await responsePromise;
+        }));
+        const responseData = yield responsePromise;
         if (responseData !== null) {
             res.status(http_status_codes_1.StatusCodes.OK).json(responseData);
         }
@@ -194,9 +204,9 @@ const completedResults = async (req, res, next) => {
     catch (err) {
         return next(err);
     }
-};
+});
 exports.completedResults = completedResults;
-const submitResults = async (req, res, next) => {
+const submitResults = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming worker request for 'submit-results'`,
@@ -207,19 +217,19 @@ const submitResults = async (req, res, next) => {
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        const resultData = await req.queryManager.submitResults(id, result, error);
+        const resultData = yield req.queryManager.submitResults(id, result, error);
         if (resultData) {
             const { queue, callbackUrl } = resultData;
-            if (await req.queryManager.areAllTasksCompleted(queue)) {
+            if (yield req.queryManager.areAllTasksCompleted(queue)) {
                 logger_1.logger.info("All Tasks Finished");
-                const results = await req.queryManager.getResults(queue);
+                const results = yield req.queryManager.getResults(queue);
                 if (connectedClients[queue]) {
                     connectedClients[queue].forEach(resolve => {
                         resolve(results);
                     });
                 }
                 if (results !== null && callbackUrl) {
-                    await req.queryManager.postResults(callbackUrl, results);
+                    yield req.queryManager.postResults(callbackUrl, results);
                 }
             }
         }
@@ -228,9 +238,9 @@ const submitResults = async (req, res, next) => {
     catch (err) {
         return next(err);
     }
-};
+});
 exports.submitResults = submitResults;
-const checkQueue = async (req, res, next) => {
+const checkQueue = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming client request for 'check-queue'`,
@@ -251,11 +261,11 @@ const checkQueue = async (req, res, next) => {
         let response;
         if (req.body.type) {
             const type = req.body.type;
-            response = await req.queryManager.checkQueue("type", type);
+            response = yield req.queryManager.checkQueue("type", type);
         }
         else if (req.body.id) {
             const id = req.body.id;
-            response = await req.queryManager.checkQueue("id", id);
+            response = yield req.queryManager.checkQueue("id", id);
         }
         if (response)
             res.status(200).json(response);
@@ -266,9 +276,9 @@ const checkQueue = async (req, res, next) => {
     catch (err) {
         return next(err);
     }
-};
+});
 exports.checkQueue = checkQueue;
-const getResults = async (req, res, next) => {
+const getResults = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming client request for 'get-results'`,
@@ -282,13 +292,13 @@ const getResults = async (req, res, next) => {
         if (!req.params.queue)
             throw new error_1.ValidationError("missing queue", error_1.ValidationErrorCode.MISSING_QUEUE_ID);
         queue = req.params.queue;
-        await (0, validations_1.validateQueueId)(parseInt(queue), req.queryManager);
+        yield (0, validations_1.validateQueueId)(parseInt(queue), req.queryManager);
     }
     catch (err) {
         return next(err);
     }
     try {
-        const response = await req.queryManager.getResults(parseInt(queue));
+        const response = yield req.queryManager.getResults(parseInt(queue));
         if (response && Object.keys(response).length === 0) {
             return res.status(http_status_codes_1.StatusCodes.NO_CONTENT);
         }
@@ -299,9 +309,9 @@ const getResults = async (req, res, next) => {
     catch (err) {
         return next(err);
     }
-};
+});
 exports.getResults = getResults;
-const status = async (req, res, next) => {
+const status = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({ message: `Incoming client request for 'status'`, requestId });
     let queue;
@@ -317,7 +327,7 @@ const status = async (req, res, next) => {
         return next(err);
     }
     try {
-        const { total_jobs, completed_count, error_count } = await req.queryManager.getStatus(parseInt(queue, 10));
+        const { total_jobs, completed_count, error_count } = yield req.queryManager.getStatus(parseInt(queue, 10));
         return res.status(http_status_codes_1.StatusCodes.OK).json({
             totalTasks: total_jobs,
             completedTasks: completed_count,
@@ -327,9 +337,9 @@ const status = async (req, res, next) => {
     catch (err) {
         return next(err);
     }
-};
+});
 exports.status = status;
-const deleteQueue = async (req, res, next) => {
+const deleteQueue = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming client request for 'delete-queue'`,
@@ -343,21 +353,22 @@ const deleteQueue = async (req, res, next) => {
         if (!req.params.queue)
             throw new error_1.ValidationError("missing queue", error_1.ValidationErrorCode.MISSING_QUEUE_ID);
         queue = req.params.queue;
-        await (0, validations_1.validateQueueId)(parseInt(queue), req.queryManager);
+        yield (0, validations_1.validateQueueId)(parseInt(queue), req.queryManager);
     }
     catch (err) {
         return next(err);
     }
     try {
-        await req.queryManager.deleteQueue(parseInt(queue));
+        yield req.queryManager.deleteQueue(parseInt(queue));
         return res.sendStatus(http_status_codes_1.StatusCodes.OK);
     }
     catch (err) {
         return next(err);
     }
-};
+});
 exports.deleteQueue = deleteQueue;
-const deleteAll = async (req, res, next) => {
+const deleteAll = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _c;
     const requestId = req.requestId;
     logger_1.logger.info({
         message: `Incoming client request for 'delete-everything'`,
@@ -367,92 +378,98 @@ const deleteAll = async (req, res, next) => {
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        await req.queryManager?.deleteEverything();
+        yield ((_c = req.queryManager) === null || _c === void 0 ? void 0 : _c.deleteEverything());
         return res.sendStatus(http_status_codes_1.StatusCodes.OK);
     }
     catch (err) {
         return next(err);
     }
-};
+});
 exports.deleteAll = deleteAll;
-const taskStats = async (req, res, next) => {
+const taskStats = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _d;
     const { timeInterval } = req.query;
     try {
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        const result = await req.queryManager?.getTasksStats(String(timeInterval));
+        const result = yield ((_d = req.queryManager) === null || _d === void 0 ? void 0 : _d.getTasksStats(String(timeInterval)));
         return res.status(http_status_codes_1.StatusCodes.OK).json(result);
     }
     catch (err) {
         return next(err);
     }
-};
+});
 exports.taskStats = taskStats;
-const recentQueues = async (req, res, next) => {
+const recentQueues = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _e;
     try {
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        const result = await req.queryManager?.getRecentQueues();
+        const result = yield ((_e = req.queryManager) === null || _e === void 0 ? void 0 : _e.getRecentQueues());
         return res.status(http_status_codes_1.StatusCodes.OK).json(result);
     }
     catch (err) {
         return next(err);
     }
-};
+});
 exports.recentQueues = recentQueues;
-const queuesDetails = async (req, res, next) => {
+const queuesDetails = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _f;
     try {
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        const result = await req.queryManager?.allQueueDetails(req.query);
+        const result = yield ((_f = req.queryManager) === null || _f === void 0 ? void 0 : _f.allQueueDetails(req.query));
         return res.status(http_status_codes_1.StatusCodes.OK).json(result);
     }
     catch (err) {
         return next(err);
     }
-};
+});
 exports.queuesDetails = queuesDetails;
-const queueDetails = async (req, res, next) => {
+const queueDetails = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _g;
     const { queue } = req.params;
     try {
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        const result = await req.queryManager?.getQueueDetails(queue, req.query);
+        const result = yield ((_g = req.queryManager) === null || _g === void 0 ? void 0 : _g.getQueueDetails(queue, req.query));
         return res.status(http_status_codes_1.StatusCodes.OK).json(result);
     }
     catch (err) {
         return next(err);
     }
-};
+});
 exports.queueDetails = queueDetails;
-const queueCounts = async (req, res, next) => {
+const queueCounts = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _h;
     try {
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        const result = await req.queryManager?.queueAndTasksCounts();
+        const result = yield ((_h = req.queryManager) === null || _h === void 0 ? void 0 : _h.queueAndTasksCounts());
         return res.status(http_status_codes_1.StatusCodes.OK).json(result);
     }
     catch (err) {
         return next(err);
     }
-};
+});
 exports.queueCounts = queueCounts;
-const taskDetails = async (req, res, next) => {
+const taskDetails = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _j;
     try {
         const queues = req.body;
         if (!req.queryManager) {
             throw new error_1.QueueError("QueryManager is not defined", error_1.QueueErrorCode.QUEUE_NOT_EXIST);
         }
-        const result = await req.queryManager?.TasksDetailsOfQueues(queues);
+        const result = yield ((_j = req.queryManager) === null || _j === void 0 ? void 0 : _j.TasksDetailsOfQueues(queues));
         return res.status(http_status_codes_1.StatusCodes.OK).json(result);
     }
     catch (err) {
         return next(err);
     }
-};
+});
 exports.taskDetails = taskDetails;

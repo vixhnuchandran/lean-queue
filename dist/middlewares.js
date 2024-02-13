@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleErrors = exports.attachQueryManager = exports.attachRequestId = void 0;
 const uuid_1 = require("uuid");
@@ -13,8 +22,8 @@ const attachRequestId = (req, res, next) => {
 };
 exports.attachRequestId = attachRequestId;
 // Middleware to attach a QueryManager instance to the request
-const attachQueryManager = async (req, res, next) => {
-    const client = await database_1.pool.connect();
+const attachQueryManager = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    const client = yield database_1.pool.connect();
     try {
         req.queryManager = new QueryManager_1.QueryManager(client);
         next();
@@ -25,7 +34,7 @@ const attachQueryManager = async (req, res, next) => {
     finally {
         client.release();
     }
-};
+});
 exports.attachQueryManager = attachQueryManager;
 // Middleware to handle errors
 const handleErrors = (err, req, res, next) => {

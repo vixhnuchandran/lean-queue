@@ -39,7 +39,7 @@ app.use(express_1.default.json({ limit: "50mb" }));
 app.use(middlewares.attachRequestId);
 app.use(middlewares.attachQueryManager);
 // Routes
-app.use("/", routes_1.default);
+app.use("/api/v1/", routes_1.default);
 app.get("/", (req, res) => {
     return res.sendStatus(http_status_codes_1.StatusCodes.OK);
 });

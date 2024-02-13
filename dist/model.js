@@ -22,19 +22,28 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const util_1 = require("util");
 const database_1 = require("./database");
 const readFileAsync = (0, util_1.promisify)(fs.readFile);
-const createTables = async () => {
+const createTables = () => __awaiter(void 0, void 0, void 0, function* () {
     let client = null;
     try {
-        client = await database_1.pool.connect();
+        client = yield database_1.pool.connect();
         const sqlFilePath = path.join(__dirname, "query.sql");
-        const sqlQueries = await readFileAsync(sqlFilePath, "utf-8");
-        await client.query(sqlQueries);
+        const sqlQueries = yield readFileAsync(sqlFilePath, "utf-8");
+        yield client.query(sqlQueries);
     }
     catch (err) {
         console.error("Error creating tables", err);
@@ -44,5 +53,5 @@ const createTables = async () => {
             client.release();
         }
     }
-};
+});
 createTables();

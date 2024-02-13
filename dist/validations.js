@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateTasks = exports.doesQueueExist = exports.validateOptions = exports.validateQueueId = exports.validateQueueType = exports.validateRequestBody = void 0;
 const error_1 = require("./error");
@@ -17,12 +26,12 @@ const validateQueueType = (type) => {
 };
 exports.validateQueueType = validateQueueType;
 // Validates queueId.
-const validateQueueId = async (queueId, queryManager) => {
+const validateQueueId = (queueId, queryManager) => __awaiter(void 0, void 0, void 0, function* () {
     if (!Number.isInteger(queueId) || queueId <= 0)
         throw new error_1.ValidationError(`invalid queue id`, error_1.ValidationErrorCode.INVALID_QUEUE_ID);
-    if (!(await (0, exports.doesQueueExist)(queryManager, queueId)))
+    if (!(yield (0, exports.doesQueueExist)(queryManager, queueId)))
         throw new error_1.QueueError(`queue id does not exist`, error_1.QueueErrorCode.QUEUE_NOT_EXIST);
-};
+});
 exports.validateQueueId = validateQueueId;
 // Validates options
 const validateOptions = (options) => {
@@ -49,18 +58,18 @@ const validateOptions = (options) => {
 };
 exports.validateOptions = validateOptions;
 // Check if queue exists in database.
-const doesQueueExist = async (queryManager, queueId) => {
+const doesQueueExist = (queryManager, queueId) => __awaiter(void 0, void 0, void 0, function* () {
     const queryStr = `
   SELECT EXISTS 
   (SELECT 1 FROM queues WHERE id = $1);
   `;
-    const response = await queryManager.client.query(queryStr, [
+    const response = yield queryManager.client.query(queryStr, [
         queueId,
     ]);
     if (!response.rows[0].exists)
         return false;
     return true;
-};
+});
 exports.doesQueueExist = doesQueueExist;
 // Validates an array of tasks.
 const validateTasks = (tasks) => {
