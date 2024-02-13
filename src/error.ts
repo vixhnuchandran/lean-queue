@@ -63,7 +63,7 @@ const handleCustomError = (
   const requestId = req.requestId
 
   if (err instanceof ValidationError || err instanceof QueueError) {
-    logger.error({
+    console.error({
       message: `${err.constructor.name}: ${err.message}`,
       requestId,
     })
@@ -71,7 +71,7 @@ const handleCustomError = (
     return res.status(httpCodes.BAD_REQUEST).json({ error: err.message })
   }
 
-  logger.error({ message: `error: ${err.message}`, requestId })
+  console.error({ message: `error: ${err.message}`, requestId })
 
   return res
     .status(httpCodes.INTERNAL_SERVER_ERROR)
@@ -82,7 +82,7 @@ const handleCustomError = (
 const handleUnknownError = (err: Error, req: Request, res: Response) => {
   const requestId = req.requestId
 
-  logger.error({ message: `error: ${err.message}`, requestId })
+  console.error({ message: `error: ${err.message}`, requestId })
 
   return res
     .status(httpCodes.INTERNAL_SERVER_ERROR)

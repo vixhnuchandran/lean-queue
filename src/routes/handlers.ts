@@ -25,7 +25,7 @@ let connectedClients: {
 
 const createQueue = async (req: Request, res: Response, next: NextFunction) => {
   const requestId = req.requestId
-  logger.info({
+  console.log({
     message: `Incoming client request for 'create-queue'`,
     requestId,
   })
@@ -58,7 +58,7 @@ const createQueue = async (req: Request, res: Response, next: NextFunction) => {
 
     if (options) validateOptions(options)
   } catch (err: any) {
-    logger.error({
+    console.error({
       message: err.message,
       requestId,
       errorCode: err.errorCode,
@@ -98,7 +98,7 @@ const createQueue = async (req: Request, res: Response, next: NextFunction) => {
 const addTasks = async (req: Request, res: Response, next: NextFunction) => {
   const requestId = req.requestId
 
-  logger.info({
+  console.log({
     message: `Incoming client request for 'add-tasks'`,
     requestId,
   })
@@ -148,7 +148,7 @@ const addTasks = async (req: Request, res: Response, next: NextFunction) => {
 
     return res.json({ numTasks })
   } catch (err: any) {
-    logger.error({ message: `add-tasks-error: ${err.message}` })
+    console.error({ message: `add-tasks-error: ${err.message}` })
     return next(err)
   }
 }
@@ -160,7 +160,7 @@ const nextAvailableTask = async (
 ) => {
   const requestId = req.requestId
 
-  logger.info({
+  console.log({
     message: `Incoming worker request for 'next-available-task'`,
     requestId,
   })
@@ -244,7 +244,7 @@ const completedResults = async (
   next: NextFunction
 ) => {
   const requestId = req.requestId
-  logger.info({
+  console.log({
     message: `Incoming client request for 'get-completed-results'`,
     requestId,
   })
@@ -317,7 +317,7 @@ const submitResults = async (
 ) => {
   const requestId = req.requestId
 
-  logger.info({
+  console.log({
     message: `Incoming worker request for 'submit-results'`,
     requestId,
   })
@@ -338,7 +338,7 @@ const submitResults = async (
       const { queue, callbackUrl } = resultData
 
       if (await req.queryManager.areAllTasksCompleted(queue)) {
-        logger.info("All Tasks Finished")
+        console.log("All Tasks Finished")
 
         const results = await req.queryManager.getResults(queue)
 
@@ -361,7 +361,7 @@ const submitResults = async (
 
 const checkQueue = async (req: Request, res: Response, next: NextFunction) => {
   const requestId = req.requestId
-  logger.info({
+  console.log({
     message: `Incoming client request for 'check-queue'`,
     requestId,
   })
@@ -404,7 +404,7 @@ const checkQueue = async (req: Request, res: Response, next: NextFunction) => {
 
 const getResults = async (req: Request, res: Response, next: NextFunction) => {
   const requestId = req.requestId
-  logger.info({
+  console.log({
     message: `Incoming client request for 'get-results'`,
     requestId,
   })
@@ -446,7 +446,7 @@ const getResults = async (req: Request, res: Response, next: NextFunction) => {
 const status = async (req: Request, res: Response, next: NextFunction) => {
   const requestId = req.requestId
 
-  logger.info({ message: `Incoming client request for 'status'`, requestId })
+  console.log({ message: `Incoming client request for 'status'`, requestId })
   let queue: string | number
 
   try {
@@ -483,7 +483,7 @@ const status = async (req: Request, res: Response, next: NextFunction) => {
 
 const deleteQueue = async (req: Request, res: Response, next: NextFunction) => {
   const requestId = req.requestId
-  logger.info({
+  console.log({
     message: `Incoming client request for 'delete-queue'`,
     requestId,
   })
@@ -520,7 +520,7 @@ const deleteQueue = async (req: Request, res: Response, next: NextFunction) => {
 const deleteAll = async (req: Request, res: Response, next: NextFunction) => {
   const requestId = req.requestId
 
-  logger.info({
+  console.log({
     message: `Incoming client request for 'delete-everything'`,
     requestId,
   })

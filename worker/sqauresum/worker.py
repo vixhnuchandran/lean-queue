@@ -43,7 +43,7 @@ def run_worker(worker_type):
 
                 else:
                     logging.warning("No task received from the server")
-                    time.sleep(0)
+                    time.sleep(5)
 
             except Exception as error:
                 logging.error("Error in run_worker:", error)
@@ -70,7 +70,7 @@ def run_worker(worker_type):
 
                 else:
                     logging.warning("No task received from the server")
-                    time.sleep(0)
+                    time.sleep(5)
 
             except Exception as error:
                 logging.error("Error in run_worker:", error)
@@ -110,7 +110,7 @@ def run_worker(worker_type):
 
                 else:
                     logging.warning("No task received from the server")
-                    time.sleep(0)
+                    time.sleep(5)
 
             except Exception as error:
                 logging.error("Error in run_worker:", error)

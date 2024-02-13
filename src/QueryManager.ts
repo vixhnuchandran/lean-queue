@@ -48,7 +48,7 @@ export class QueryManager {
 
       return queue.rows[0].id
     } catch (err: any) {
-      logger.error({ message: `'createQueue' ${err.message}` })
+      console.error({ message: `'createQueue' ${err.message}` })
       return null
     }
   }
@@ -70,7 +70,7 @@ export class QueryManager {
         await this.client.query("BEGIN")
         numTasks = await this.addTasks(queue, tasks, options)
       } else {
-        logger.error({
+        console.error({
           message: "createQueue operation did not return a valid queue.",
         })
       }
@@ -78,7 +78,7 @@ export class QueryManager {
     } catch (err: any) {
       await this.deleteQueue(queue)
       await this.client.query("ROLLBACK")
-      logger.error({
+      console.error({
         message: `error in 'createQueueAndAddTasks': ${err.message}`,
       })
       return null
@@ -127,7 +127,7 @@ export class QueryManager {
         } catch (err: any) {
           await this.client.query("ROLLBACK")
 
-          logger.error({
+          console.error({
             message: `Error adding batch ${i + 1}: ${err.message}`,
           })
 
@@ -139,7 +139,7 @@ export class QueryManager {
       else return 0
     } catch (err: any) {
       await this.deleteQueue(queue)
-      logger.error({ message: `error in 'addTasks': ${err.message}` })
+      console.error({ message: `error in 'addTasks': ${err.message}` })
       return
     }
   }
@@ -156,7 +156,7 @@ export class QueryManager {
         await this.client.query(format(queryStr, batch))
       }
     } catch (err: any) {
-      logger.error({ message: `error in 'addTasksByBatch': ${err.message}` })
+      console.error({ message: `error in 'addTasksByBatch': ${err.message}` })
     }
   }
 
@@ -168,7 +168,7 @@ export class QueryManager {
         `
       await this.client.query(queryStr)
     } catch (err: any) {
-      logger.error({ message: `error in 'deleteQueue': ${err.message}` })
+      console.error({ message: `error in 'deleteQueue': ${err.message}` })
     }
   }
 
@@ -178,9 +178,9 @@ export class QueryManager {
       TRUNCATE TABLE tasks, queues RESTART IDENTITY
         `
       await this.client.query(queryStr)
-      logger.info("Deleted everything successfully")
+      console.log("Deleted everything successfully")
     } catch (err: any) {
-      logger.error({ message: `error in 'deleteEverything': ${err.message}` })
+      console.error({ message: `error in 'deleteEverything': ${err.message}` })
     }
   }
 
@@ -208,7 +208,7 @@ export class QueryManager {
       data = result.rows[0]
 
       if (!data) {
-        logger.info("No tasks available right now!")
+        console.log("No tasks available right now!")
       } else if (data) {
         const queryStr: string = format(
           `
@@ -226,7 +226,7 @@ export class QueryManager {
       return data
     } catch (err: any) {
       await this.client.query("ROLLBACK")
-      logger.error({ message: `Error in getNextTaskByQueue: ${err.message}` })
+      console.error({ message: `Error in getNextTaskByQueue: ${err.message}` })
       return null
     }
   }
@@ -253,7 +253,7 @@ export class QueryManager {
 
       data = result.rows[0]
       if (!data) {
-        logger.info("No tasks available right now!")
+        console.log("No tasks available right now!")
       } else {
         const queryStr: string = `
           UPDATE tasks SET status = 'processing', start_time =  CURRENT_TIMESTAMP
@@ -267,7 +267,7 @@ export class QueryManager {
     } catch (err: any) {
       await this.client.query("ROLLBACK")
 
-      logger.error({ message: `Error in getNextTaskByType: ${err.message}` })
+      console.error({ message: `Error in getNextTaskByType: ${err.message}` })
       return null
     }
   }
@@ -298,7 +298,7 @@ export class QueryManager {
 
       data = result.rows[0]
       if (!data) {
-        logger.info("No tasks available right now!")
+        console.log("No tasks available right now!")
       } else if (data) {
         const queryStr: string = `
           UPDATE tasks SET status = 'processing', start_time =  CURRENT_TIMESTAMP
@@ -312,7 +312,7 @@ export class QueryManager {
     } catch (err: any) {
       await this.client.query("ROLLBACK")
 
-      logger.error({ message: `Error in getNextTaskByTags: ${err.message}` })
+      console.error({ message: `Error in getNextTaskByTags: ${err.message}` })
 
       return null
     }
@@ -363,7 +363,7 @@ export class QueryManager {
       return { queue, callbackUrl }
     } catch (err: any) {
       await this.client.query("ROLLBACK")
-      logger.error({ message: `error in 'submitResults' : ${err.message}` })
+      console.error({ message: `error in 'submitResults' : ${err.message}` })
       return null
     }
   }
@@ -383,7 +383,7 @@ export class QueryManager {
 
       return response.rows[0]
     } catch (err: any) {
-      logger.error({ message: `error in 'getStatus': ${err.message}` })
+      console.error({ message: `error in 'getStatus': ${err.message}` })
     }
   }
 
@@ -401,7 +401,7 @@ export class QueryManager {
       const queueData = response.rows[0] || null
       return queueData
     } catch (err: any) {
-      logger.error({ message: `Error in 'checkQueue': ${err.message}` })
+      console.error({ message: `Error in 'checkQueue': ${err.message}` })
       return null
     }
   }
@@ -427,7 +427,7 @@ export class QueryManager {
         results[row.task_id] = row.result
       })
     } catch (err: any) {
-      logger.error({ message: `error in 'getResults': ${err.message}` })
+      console.error({ message: `error in 'getResults': ${err.message}` })
     }
     return results
   }
@@ -442,7 +442,7 @@ export class QueryManager {
         body: JSON.stringify(results),
       })
     } catch (err: any) {
-      logger.error({ message: `error in 'postResults': ${err.message}` })
+      console.error({ message: `error in 'postResults': ${err.message}` })
     }
   }
 
