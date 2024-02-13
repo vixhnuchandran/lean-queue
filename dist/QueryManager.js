@@ -1,220 +1,187 @@
-"use strict"
-var __awaiter =
-  (this && this.__awaiter) ||
-  function (thisArg, _arguments, P, generator) {
-    function adopt(value) {
-      return value instanceof P
-        ? value
-        : new P(function (resolve) {
-            resolve(value)
-          })
-    }
+"use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
-      function fulfilled(value) {
-        try {
-          step(generator.next(value))
-        } catch (e) {
-          reject(e)
-        }
-      }
-      function rejected(value) {
-        try {
-          step(generator["throw"](value))
-        } catch (e) {
-          reject(e)
-        }
-      }
-      function step(result) {
-        result.done
-          ? resolve(result.value)
-          : adopt(result.value).then(fulfilled, rejected)
-      }
-      step((generator = generator.apply(thisArg, _arguments || [])).next())
-    })
-  }
-var __importDefault =
-  (this && this.__importDefault) ||
-  function (mod) {
-    return mod && mod.__esModule ? mod : { default: mod }
-  }
-Object.defineProperty(exports, "__esModule", { value: true })
-exports.QueryManager = void 0
-const pg_format_1 = __importDefault(require("pg-format"))
-const logger_1 = require("./utils/logger")
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.QueryManager = void 0;
+const pg_format_1 = __importDefault(require("pg-format"));
 class QueryManager {
-  constructor(client) {
-    this.client = client
-  }
-  getExpiryTime(queue) {
-    return __awaiter(this, void 0, void 0, function* () {
-      const queryStr = `
+    constructor(client) {
+        this.client = client;
+    }
+    getExpiryTime(queue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const queryStr = `
     SELECT options->>'expiryTime'
     FROM queues
     WHERE id = $1;
-    `
-      const result = yield this.client.query(queryStr, [queue])
-      return parseInt(result.rows[0]["?column?"])
-    })
-  }
-  createQueue(type, tags, options, notes) {
-    return __awaiter(this, void 0, void 0, function* () {
-      let queue
-      let tagsArray
-      try {
-        if (Array.isArray(tags) && tags.length > 0) {
-          tagsArray = tags.map(tag => `${tag}`)
-        }
-        const queryStr = `
+    `;
+            const result = yield this.client.query(queryStr, [queue]);
+            return parseInt(result.rows[0]["?column?"]);
+        });
+    }
+    createQueue(type, tags, options, notes) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let queue;
+            let tagsArray;
+            try {
+                if (Array.isArray(tags) && tags.length > 0) {
+                    tagsArray = tags.map((tag) => `${tag}`);
+                }
+                const queryStr = `
       INSERT INTO queues (type, tags, options, info, notes) 
       VALUES ($1, $2, $3, $4, $5)
-      RETURNING id;`
-        const info = {
-          created_at: Date.now(),
-          updated_at: Date.now(),
-        }
-        const queryParams = [type, tagsArray, options, info, notes],
-          queue = yield this.client.query(queryStr, queryParams)
-        return queue.rows[0].id
-      } catch (err) {
-        logger_1.console.error({ message: `'createQueue' ${err.message}` })
-        return null
-      }
-    })
-  }
-  createQueueAndAddTasks(type, tasks, tags, options, notes) {
-    return __awaiter(this, void 0, void 0, function* () {
-      let queue
-      let numTasks
-      try {
-        queue = yield this.createQueue(type, tags, options, notes)
-        if (queue) {
-          yield this.client.query("BEGIN")
-          numTasks = yield this.addTasks(queue, tasks, options)
-        } else {
-          logger_1.console.error({
-            message: "createQueue operation did not return a valid queue.",
-          })
-        }
-        return { queue, numTasks }
-      } catch (err) {
-        yield this.deleteQueue(queue)
-        yield this.client.query("ROLLBACK")
-        logger_1.console.error({
-          message: `error in 'createQueueAndAddTasks': ${err.message}`,
-        })
-        return null
-      }
-    })
-  }
-  addTasks(queue, tasks, options) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const batchSize = 4096
-        const totalEntries = Object.entries(tasks)
-        const totalBatches = Math.ceil(totalEntries.length / batchSize)
-        let successfulBatches = 0
-        const currentTime = new Date()
-        let expiryTime
-        if (options && options.expiryTime !== undefined) {
-          expiryTime = new Date(currentTime.getTime() + options.expiryTime)
-        } else {
-          const expiryTimeFromQueue =
-            (yield this.getExpiryTime(queue)) || 2 * 60 * 1000 // 2min default
-          expiryTime = new Date(currentTime.getTime() + expiryTimeFromQueue)
-        }
-        yield this.client.query("BEGIN")
-        for (let i = 0; i < totalBatches; i++) {
-          const batchStart = i * batchSize
-          const batchEnd = (i + 1) * batchSize
-          const batch = totalEntries
-            .slice(batchStart, batchEnd)
-            .map(([_, data]) => {
-              return [
-                data.taskId,
-                data.params,
-                data.priority,
-                expiryTime,
-                queue,
-              ]
-            })
-          try {
-            yield this.addTasksByBatch(batch)
-            yield this.client.query("COMMIT")
-            successfulBatches++
-          } catch (err) {
-            yield this.client.query("ROLLBACK")
-            logger_1.console.error({
-              message: `Error adding batch ${i + 1}: ${err.message}`,
-            })
-            return
-          }
-        }
-        if (successfulBatches === totalBatches) return totalEntries.length
-        else return 0
-      } catch (err) {
-        yield this.deleteQueue(queue)
-        logger_1.console.error({
-          message: `error in 'addTasks': ${err.message}`,
-        })
-        return
-      }
-    })
-  }
-  addTasksByBatch(batch) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        if (batch) {
-          // add-tasks,
-          const queryStr = `
+      RETURNING id;`;
+                const info = {
+                    created_at: Date.now(),
+                    updated_at: Date.now(),
+                };
+                const queryParams = [type, tagsArray, options, info, notes], queue = yield this.client.query(queryStr, queryParams);
+                return queue.rows[0].id;
+            }
+            catch (err) {
+                console.error({ message: `'createQueue' ${err.message}` });
+                return null;
+            }
+        });
+    }
+    createQueueAndAddTasks(type, tasks, tags, options, notes) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let queue;
+            let numTasks;
+            try {
+                queue = yield this.createQueue(type, tags, options, notes);
+                if (queue) {
+                    yield this.client.query("BEGIN");
+                    numTasks = yield this.addTasks(queue, tasks, options);
+                }
+                else {
+                    console.error({
+                        message: "createQueue operation did not return a valid queue.",
+                    });
+                }
+                return { queue, numTasks };
+            }
+            catch (err) {
+                yield this.deleteQueue(queue);
+                yield this.client.query("ROLLBACK");
+                console.error({
+                    message: `error in 'createQueueAndAddTasks': ${err.message}`,
+                });
+                return null;
+            }
+        });
+    }
+    addTasks(queue, tasks, options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const batchSize = 4096;
+                const totalEntries = Object.entries(tasks);
+                const totalBatches = Math.ceil(totalEntries.length / batchSize);
+                let successfulBatches = 0;
+                const currentTime = new Date();
+                let expiryTime;
+                if (options && options.expiryTime !== undefined) {
+                    expiryTime = new Date(currentTime.getTime() + options.expiryTime);
+                }
+                else {
+                    const expiryTimeFromQueue = (yield this.getExpiryTime(queue)) || 2 * 60 * 1000; // 2min default
+                    expiryTime = new Date(currentTime.getTime() + expiryTimeFromQueue);
+                }
+                yield this.client.query("BEGIN");
+                for (let i = 0; i < totalBatches; i++) {
+                    const batchStart = i * batchSize;
+                    const batchEnd = (i + 1) * batchSize;
+                    const batch = totalEntries
+                        .slice(batchStart, batchEnd)
+                        .map(([_, data]) => {
+                        return [data.taskId, data.params, data.priority, expiryTime, queue];
+                    });
+                    try {
+                        yield this.addTasksByBatch(batch);
+                        yield this.client.query("COMMIT");
+                        successfulBatches++;
+                    }
+                    catch (err) {
+                        yield this.client.query("ROLLBACK");
+                        console.error({
+                            message: `Error adding batch ${i + 1}: ${err.message}`,
+                        });
+                        return;
+                    }
+                }
+                if (successfulBatches === totalBatches)
+                    return totalEntries.length;
+                else
+                    return 0;
+            }
+            catch (err) {
+                yield this.deleteQueue(queue);
+                console.error({ message: `error in 'addTasks': ${err.message}` });
+                return;
+            }
+        });
+    }
+    addTasksByBatch(batch) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                if (batch) {
+                    // add-tasks,
+                    const queryStr = `
           INSERT INTO tasks (task_id, params, priority ,expiry_time, queue_id) 
           VALUES %L
-        `
-          yield this.client.query((0, pg_format_1.default)(queryStr, batch))
-        }
-      } catch (err) {
-        logger_1.console.error({
-          message: `error in 'addTasksByBatch': ${err.message}`,
-        })
-      }
-    })
-  }
-  deleteQueue(queue) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr = `
+        `;
+                    yield this.client.query((0, pg_format_1.default)(queryStr, batch));
+                }
+            }
+            catch (err) {
+                console.error({ message: `error in 'addTasksByBatch': ${err.message}` });
+            }
+        });
+    }
+    deleteQueue(queue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr = `
         DELETE FROM queues
         WHERE id = ${queue};
-        `
-        yield this.client.query(queryStr)
-      } catch (err) {
-        logger_1.console.error({
-          message: `error in 'deleteQueue': ${err.message}`,
-        })
-      }
-    })
-  }
-  deleteEverything() {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr = `
+        `;
+                yield this.client.query(queryStr);
+            }
+            catch (err) {
+                console.error({ message: `error in 'deleteQueue': ${err.message}` });
+            }
+        });
+    }
+    deleteEverything() {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr = `
       TRUNCATE TABLE tasks, queues RESTART IDENTITY
-        `
-        yield this.client.query(queryStr)
-        logger_1.console.log("Deleted everything successfully")
-      } catch (err) {
-        logger_1.console.error({
-          message: `error in 'deleteEverything': ${err.message}`,
-        })
-      }
-    })
-  }
-  getNextAvailableTaskByQueue(queue) {
-    return __awaiter(this, void 0, void 0, function* () {
-      let data = null
-      try {
-        yield this.client.query("BEGIN")
-        const queryStr = (0, pg_format_1.default)(
-          `
+        `;
+                yield this.client.query(queryStr);
+                console.log("Deleted everything successfully");
+            }
+            catch (err) {
+                console.error({ message: `error in 'deleteEverything': ${err.message}` });
+            }
+        });
+    }
+    getNextAvailableTaskByQueue(queue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let data = null;
+            try {
+                yield this.client.query("BEGIN");
+                const queryStr = (0, pg_format_1.default)(`
         SELECT tasks.*, queues.type as queue_type
         FROM tasks
         JOIN queues ON tasks.queue_id = queues.id
@@ -223,42 +190,36 @@ class QueryManager {
                (tasks.status = 'processing' AND tasks.expiry_time < NOW()))
         ORDER BY (tasks.priority)::int DESC
         LIMIT 1;
-      `,
-          queue
-        )
-        const result = yield this.client.query(queryStr)
-        data = result.rows[0]
-        if (!data) {
-          logger_1.console.log("No tasks available right now!")
-        } else if (data) {
-          const queryStr = (0, pg_format_1.default)(
-            `
+      `, queue);
+                const result = yield this.client.query(queryStr);
+                data = result.rows[0];
+                if (!data) {
+                    console.log("No tasks available right now!");
+                }
+                else if (data) {
+                    const queryStr = (0, pg_format_1.default)(`
           UPDATE tasks
           SET status = 'processing', start_time = CURRENT_TIMESTAMP
           WHERE id = %L;
-           `,
-            data.id
-          )
-          yield this.client.query(queryStr)
-        }
-        yield this.client.query("COMMIT")
-        return data
-      } catch (err) {
-        yield this.client.query("ROLLBACK")
-        logger_1.console.error({
-          message: `Error in getNextTaskByQueue: ${err.message}`,
-        })
-        return null
-      }
-    })
-  }
-  getNextAvailableTaskByType(type) {
-    return __awaiter(this, void 0, void 0, function* () {
-      let data = null
-      try {
-        yield this.client.query("BEGIN")
-        const queryStr = (0, pg_format_1.default)(
-          `
+           `, data.id);
+                    yield this.client.query(queryStr);
+                }
+                yield this.client.query("COMMIT");
+                return data;
+            }
+            catch (err) {
+                yield this.client.query("ROLLBACK");
+                console.error({ message: `Error in getNextTaskByQueue: ${err.message}` });
+                return null;
+            }
+        });
+    }
+    getNextAvailableTaskByType(type) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let data = null;
+            try {
+                yield this.client.query("BEGIN");
+                const queryStr = (0, pg_format_1.default)(`
         SELECT tasks.*
         FROM tasks
         JOIN queues ON tasks.queue_id = queues.id
@@ -266,40 +227,37 @@ class QueryManager {
           AND (tasks.status = 'available' OR 
                (tasks.status = 'processing' AND tasks.expiry_time < NOW()))
         ORDER BY (tasks.priority)::int DESC
-        LIMIT 1;`,
-          type
-        )
-        const result = yield this.client.query(queryStr)
-        data = result.rows[0]
-        if (!data) {
-          logger_1.console.log("No tasks available right now!")
-        } else {
-          const queryStr = `
+        LIMIT 1;`, type);
+                const result = yield this.client.query(queryStr);
+                data = result.rows[0];
+                if (!data) {
+                    console.log("No tasks available right now!");
+                }
+                else {
+                    const queryStr = `
           UPDATE tasks SET status = 'processing', start_time =  CURRENT_TIMESTAMP
           WHERE id = ${data.id};
-          `
-          yield this.client.query(queryStr)
-          yield this.client.query("COMMIT")
-        }
-        return data
-      } catch (err) {
-        yield this.client.query("ROLLBACK")
-        logger_1.console.error({
-          message: `Error in getNextTaskByType: ${err.message}`,
-        })
-        return null
-      }
-    })
-  }
-  getNextAvailableTaskByTags(tags) {
-    return __awaiter(this, void 0, void 0, function* () {
-      let data = null
-      try {
-        let tagsArray = Array.isArray(tags) ? tags : JSON.parse(tags)
-        const tagsCondition = tagsArray.map(tag => `${tag}`)
-        yield this.client.query("BEGIN")
-        const queryStr = (0, pg_format_1.default)(
-          `
+          `;
+                    yield this.client.query(queryStr);
+                    yield this.client.query("COMMIT");
+                }
+                return data;
+            }
+            catch (err) {
+                yield this.client.query("ROLLBACK");
+                console.error({ message: `Error in getNextTaskByType: ${err.message}` });
+                return null;
+            }
+        });
+    }
+    getNextAvailableTaskByTags(tags) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let data = null;
+            try {
+                let tagsArray = Array.isArray(tags) ? tags : JSON.parse(tags);
+                const tagsCondition = tagsArray.map(tag => `${tag}`);
+                yield this.client.query("BEGIN");
+                const queryStr = (0, pg_format_1.default)(`
           SELECT tasks.*, queues.type as queue_type
           FROM tasks
           JOIN queues ON tasks.queue_id = queues.id
@@ -308,36 +266,34 @@ class QueryManager {
                  (tasks.status = 'processing' AND tasks.expiry_time < NOW()))
           ORDER BY (tasks.priority)::int DESC
           LIMIT 1;
-        `,
-          tagsCondition
-        )
-        const result = yield this.client.query(queryStr)
-        data = result.rows[0]
-        if (!data) {
-          logger_1.console.log("No tasks available right now!")
-        } else if (data) {
-          const queryStr = `
+        `, tagsCondition);
+                const result = yield this.client.query(queryStr);
+                data = result.rows[0];
+                if (!data) {
+                    console.log("No tasks available right now!");
+                }
+                else if (data) {
+                    const queryStr = `
           UPDATE tasks SET status = 'processing', start_time =  CURRENT_TIMESTAMP
           WHERE id = ${data.id};
-          `
-          yield this.client.query(queryStr)
-          yield this.client.query("COMMIT")
-        }
-        return data
-      } catch (err) {
-        yield this.client.query("ROLLBACK")
-        logger_1.console.error({
-          message: `Error in getNextTaskByTags: ${err.message}`,
-        })
-        return null
-      }
-    })
-  }
-  submitResults(id, result, error) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const resultObj = error ? { error } : { result }
-        const queryStr = `
+          `;
+                    yield this.client.query(queryStr);
+                    yield this.client.query("COMMIT");
+                }
+                return data;
+            }
+            catch (err) {
+                yield this.client.query("ROLLBACK");
+                console.error({ message: `Error in getNextTaskByTags: ${err.message}` });
+                return null;
+            }
+        });
+    }
+    submitResults(id, result, error) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const resultObj = error ? { error } : { result };
+                const queryStr = `
           UPDATE tasks 
           SET 
             status = CASE
@@ -349,171 +305,167 @@ class QueryManager {
           FROM queues
           WHERE tasks.id = $3 AND queues.id = tasks.queue_id
           RETURNING tasks.queue_id, queues.options->>'callback' AS callback_url;
-        `
-        const queryStr2 = `
+        `;
+                const queryStr2 = `
       UPDATE queues
       SET info = jsonb_set(info, '{updated_at}', to_jsonb(EXTRACT(EPOCH FROM NOW()) * 1000)::text::jsonb, true)
       WHERE id = $1;
       
       
-      `
-        yield this.client.query("BEGIN")
-        const response = yield this.client.query(queryStr, [
-          error,
-          JSON.stringify(resultObj),
-          id,
-        ])
-        const queue = response.rows[0].queue_id
-        yield this.client.query(queryStr2, [queue])
-        const callbackUrl = response.rows[0].callback_url
-        yield this.client.query("COMMIT")
-        return { queue, callbackUrl }
-      } catch (err) {
-        yield this.client.query("ROLLBACK")
-        logger_1.console.error({
-          message: `error in 'submitResults' : ${err.message}`,
-        })
-        return null
-      }
-    })
-  }
-  getStatus(queue) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr = `
+      `;
+                yield this.client.query("BEGIN");
+                const response = yield this.client.query(queryStr, [
+                    error,
+                    JSON.stringify(resultObj),
+                    id,
+                ]);
+                const queue = response.rows[0].queue_id;
+                yield this.client.query(queryStr2, [queue]);
+                const callbackUrl = response.rows[0].callback_url;
+                yield this.client.query("COMMIT");
+                return { queue, callbackUrl };
+            }
+            catch (err) {
+                yield this.client.query("ROLLBACK");
+                console.error({ message: `error in 'submitResults' : ${err.message}` });
+                return null;
+            }
+        });
+    }
+    getStatus(queue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr = `
         SELECT 
             COUNT(task_id) AS total_jobs,
             SUM(CASE WHEN status = 'completed' OR status = 'error' THEN 1 ELSE 0 END) AS completed_count,
             SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count
         FROM tasks
         WHERE queue_id = ${queue} ;
-         `
-        const response = yield this.client.query(queryStr)
-        return response.rows[0]
-      } catch (err) {
-        logger_1.console.error({
-          message: `error in 'getStatus': ${err.message}`,
-        })
-      }
-    })
-  }
-  checkQueue(field, value) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr = `
+         `;
+                const response = yield this.client.query(queryStr);
+                return response.rows[0];
+            }
+            catch (err) {
+                console.error({ message: `error in 'getStatus': ${err.message}` });
+            }
+        });
+    }
+    checkQueue(field, value) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr = `
         SELECT id, type
         FROM queues
         WHERE ${field} = $1;
-      `
-        const response = yield this.client.query(queryStr, [value])
-        const queueData = response.rows[0] || null
-        return queueData
-      } catch (err) {
-        logger_1.console.error({
-          message: `Error in 'checkQueue': ${err.message}`,
-        })
-        return null
-      }
-    })
-  }
-  getResults(queue) {
-    return __awaiter(this, void 0, void 0, function* () {
-      let results = {}
-      try {
-        const queryStr = `
+      `;
+                const response = yield this.client.query(queryStr, [value]);
+                const queueData = response.rows[0] || null;
+                return queueData;
+            }
+            catch (err) {
+                console.error({ message: `Error in 'checkQueue': ${err.message}` });
+                return null;
+            }
+        });
+    }
+    getResults(queue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let results = {};
+            try {
+                const queryStr = `
         SELECT task_id, result
         FROM tasks
         WHERE status IN ('completed', 'error') 
           AND queue_id = ${queue};
-      `
-        const response = yield this.client.query(queryStr)
-        if (response.rows.length === 0) {
-          return null
-        }
-        response.rows.forEach(row => {
-          results[row.task_id] = row.result
-        })
-      } catch (err) {
-        logger_1.console.error({
-          message: `error in 'getResults': ${err.message}`,
-        })
-      }
-      return results
-    })
-  }
-  postResults(url, results) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        yield fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(results),
-        })
-      } catch (err) {
-        logger_1.console.error({
-          message: `error in 'postResults': ${err.message}`,
-        })
-      }
-    })
-  }
-  areAllTasksCompleted(queue) {
-    return __awaiter(this, void 0, void 0, function* () {
-      let areCompleted = false
-      let totalTasks, completedTasks
-      if (queue) {
-        totalTasks = yield this.totalTaskCountInQueue(queue)
-        completedTasks = yield this.completedTaskCountInQueue(queue)
-        if (totalTasks.rows[0].count === completedTasks.rows[0].count) {
-          areCompleted = true
-        }
-      }
-      return areCompleted
-    })
-  }
-  totalTaskCountInQueue(queue) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr = `
+      `;
+                const response = yield this.client.query(queryStr);
+                if (response.rows.length === 0) {
+                    return null;
+                }
+                response.rows.forEach(row => {
+                    results[row.task_id] = row.result;
+                });
+            }
+            catch (err) {
+                console.error({ message: `error in 'getResults': ${err.message}` });
+            }
+            return results;
+        });
+    }
+    postResults(url, results) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                yield fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(results),
+                });
+            }
+            catch (err) {
+                console.error({ message: `error in 'postResults': ${err.message}` });
+            }
+        });
+    }
+    areAllTasksCompleted(queue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let areCompleted = false;
+            let totalTasks, completedTasks;
+            if (queue) {
+                totalTasks = yield this.totalTaskCountInQueue(queue);
+                completedTasks = yield this.completedTaskCountInQueue(queue);
+                if (totalTasks.rows[0].count === completedTasks.rows[0].count) {
+                    areCompleted = true;
+                }
+            }
+            return areCompleted;
+        });
+    }
+    totalTaskCountInQueue(queue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr = `
         SELECT COUNT(*) FROM tasks 
         WHERE queue_id = ${queue}
-      `
-        const response = yield this.client.query(queryStr)
-        return response
-      } catch (error) {
-        console.error("Error querying the database:", error.message)
-        throw error
-      }
-    })
-  }
-  completedTaskCountInQueue(queue) {
-    return __awaiter(this, void 0, void 0, function* () {
-      const queryStr = `
+      `;
+                const response = yield this.client.query(queryStr);
+                return response;
+            }
+            catch (error) {
+                console.error("Error querying the database:", error.message);
+                throw error;
+            }
+        });
+    }
+    completedTaskCountInQueue(queue) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const queryStr = `
         SELECT COUNT(*) FROM tasks 
         WHERE queue_id = ${queue} 
           AND status IN ('completed', 'error')
-        `
-      const response = yield this.client.query(queryStr)
-      return response
-    })
-  }
-  //---------------------------------------------------------------------------------------------
-  // -----------------------------------------------------------------------------------
-  //----------------------------   Dashboard data functions  ----------------------------
-  //----------------------------------------------------------------------------------------------
-  //---------------------------------------------------------------------------------------------
-  /**
-   * Returns the statistics of the tasks in the system.
-   * @returns An object containing the total number of tasks,
-   *  the number of tasks added in the last hour, the number of pending tasks,
-   *  the number of completed tasks, the number of successful tasks, and the number of errored tasks.
-   */
-  getTasksStats(timeInterval) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        let defaultInterval = timeInterval == "" ? "5000 years" : timeInterval
-        const queryStr = `
+        `;
+            const response = yield this.client.query(queryStr);
+            return response;
+        });
+    }
+    //---------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------
+    //----------------------------   Dashboard data functions  ----------------------------
+    //----------------------------------------------------------------------------------------------
+    //---------------------------------------------------------------------------------------------
+    /**
+     * Returns the statistics of the tasks in the system.
+     * @returns An object containing the total number of tasks,
+     *  the number of tasks added in the last hour, the number of pending tasks,
+     *  the number of completed tasks, the number of successful tasks, and the number of errored tasks.
+     */
+    getTasksStats(timeInterval) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                let defaultInterval = timeInterval == "" ? "5000 years" : timeInterval;
+                const queryStr = `
     SELECT 
       COUNT(*) AS total_tasks, 
       COUNT(
@@ -541,31 +493,32 @@ class QueryManager {
         ) THEN 1 END
       ) AS error_tasks 
     FROM 
-      tasks;`
-        const result = yield this.client.query(queryStr)
-        const queryResult = {
-          totalTasks: result.rows[0].total_tasks,
-          addedTasks: result.rows[0].added_tasks,
-          pendingTasks: result.rows[0].pending_tasks,
-          completedTasks: result.rows[0].completed_tasks,
-          successTasks: result.rows[0].success_tasks,
-          errorTasks: result.rows[0].error_tasks,
-        }
-        return queryResult
-      } catch (err) {
-        console.error("Error in taskStats:", err)
-        return 0
-      }
-    })
-  }
-  /**
-   * Returns the details of recent queues in the system.
-   * @returns {object} The details of recent queues.
-   */
-  getRecentQueues() {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr1 = `
+      tasks;`;
+                const result = yield this.client.query(queryStr);
+                const queryResult = {
+                    totalTasks: result.rows[0].total_tasks,
+                    addedTasks: result.rows[0].added_tasks,
+                    pendingTasks: result.rows[0].pending_tasks,
+                    completedTasks: result.rows[0].completed_tasks,
+                    successTasks: result.rows[0].success_tasks,
+                    errorTasks: result.rows[0].error_tasks,
+                };
+                return queryResult;
+            }
+            catch (err) {
+                console.error("Error in taskStats:", err);
+                return 0;
+            }
+        });
+    }
+    /**
+     * Returns the details of recent queues in the system.
+     * @returns {object} The details of recent queues.
+     */
+    getRecentQueues() {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr1 = `
       WITH RecentQueues AS (
         SELECT 
           id, 
@@ -601,8 +554,8 @@ class QueryManager {
       ORDER BY 
         rq.id;
       
-    `
-        const queryStr2 = `
+    `;
+                const queryStr2 = `
       WITH RecentQueues AS (
         SELECT 
           id, 
@@ -703,48 +656,47 @@ class QueryManager {
       ORDER BY 
         tc.queue_id;
       
-    `
-        const result1 = yield this.client.query(queryStr1)
-        const result2 = yield this.client.query(queryStr2)
-        if (result1.rows.length === 0 && result2.rows.length === 0) {
-          return []
-        }
-        const joinedResults = result1.rows.map(row1 => {
-          const matchingRow2 = result2.rows.find(
-            row2 => row2.queue_id === row1.queue_id
-          )
-          return Object.assign(Object.assign({}, row1), matchingRow2)
-        })
-        const joinedResultsSorted = joinedResults.sort((a, b) => {
-          const updatedAtA = new Date(a.updated_at)
-          const updatedAtB = new Date(b.updated_at)
-          return updatedAtB.getTime() - updatedAtA.getTime()
-        })
-        const queryResult = joinedResultsSorted.map(result => ({
-          id: result.queue_id,
-          type: result.type,
-          completedTasks: result.completed_tasks_count,
-          updatedAt: result.updated_at,
-          pendingTasks: result.pending_tasks_count,
-          avgExecTime: result.avg_execution_time_completed,
-          EstCompTime: result.estimated_completion_time_pending,
-        }))
-        return queryResult
-      } catch (err) {
-        console.error("Error in getRecentQueues:", err)
-        return 0
-      }
-    })
-  }
-  /**
-   * Returns the details of all queues in the system.
-   * @returns {object} The details of all queues and totalPages.
-   */
-  allQueueDetails(query) {
-    var _a
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        let queryStr = `
+    `;
+                const result1 = yield this.client.query(queryStr1);
+                const result2 = yield this.client.query(queryStr2);
+                if (result1.rows.length === 0 && result2.rows.length === 0) {
+                    return [];
+                }
+                const joinedResults = result1.rows.map(row1 => {
+                    const matchingRow2 = result2.rows.find(row2 => row2.queue_id === row1.queue_id);
+                    return Object.assign(Object.assign({}, row1), matchingRow2);
+                });
+                const joinedResultsSorted = joinedResults.sort((a, b) => {
+                    const updatedAtA = new Date(a.updated_at);
+                    const updatedAtB = new Date(b.updated_at);
+                    return updatedAtB.getTime() - updatedAtA.getTime();
+                });
+                const queryResult = joinedResultsSorted.map(result => ({
+                    id: result.queue_id,
+                    type: result.type,
+                    completedTasks: result.completed_tasks_count,
+                    updatedAt: result.updated_at,
+                    pendingTasks: result.pending_tasks_count,
+                    avgExecTime: result.avg_execution_time_completed,
+                    EstCompTime: result.estimated_completion_time_pending,
+                }));
+                return queryResult;
+            }
+            catch (err) {
+                console.error("Error in getRecentQueues:", err);
+                return 0;
+            }
+        });
+    }
+    /**
+     * Returns the details of all queues in the system.
+     * @returns {object} The details of all queues and totalPages.
+     */
+    allQueueDetails(query) {
+        var _a;
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                let queryStr = `
       SELECT
       COUNT(*) OVER () AS total_records,
       q.id AS queue_id,
@@ -757,104 +709,99 @@ class QueryManager {
       queues q
     LEFT JOIN
       tasks t ON q.id = t.queue_id
-    `
-        const queryParams = []
-        if (query.search) {
-          const searchTerm = `%${query.search.trim().toLowerCase()}%`
-          queryStr += `
+    `;
+                const queryParams = [];
+                if (query.search) {
+                    const searchTerm = `%${query.search.trim().toLowerCase()}%`;
+                    queryStr += `
           WHERE
             LOWER(q.type) LIKE $1
             OR LOWER(q.tags::text) LIKE $1
-        `
-          queryParams.push(searchTerm)
-        }
-        if (query.tag) {
-          const tagTerm = query.tag.trim()
-          queryStr += `
+        `;
+                    queryParams.push(searchTerm);
+                }
+                if (query.tag) {
+                    const tagTerm = query.tag.trim();
+                    queryStr += `
           WHERE
              $1 = ANY(q.tags)
-        `
-          queryParams.push(tagTerm)
-        }
-        if (query.sortBy && query.sortOrder) {
-          const validSortByFields = [
-            "id",
-            "type",
-            "tags",
-            "created_at",
-            "updated_at",
-          ]
-          if (validSortByFields.includes(query.sortBy)) {
-            if (
-              query.sortBy === "created_at" ||
-              query.sortBy === "updated_at"
-            ) {
-              queryStr += `
+        `;
+                    queryParams.push(tagTerm);
+                }
+                if (query.sortBy && query.sortOrder) {
+                    const validSortByFields = [
+                        "id",
+                        "type",
+                        "tags",
+                        "created_at",
+                        "updated_at",
+                    ];
+                    if (validSortByFields.includes(query.sortBy)) {
+                        if (query.sortBy === "created_at" || query.sortBy === "updated_at") {
+                            queryStr += `
               GROUP BY
                 q.id, q.type, q.info->>'created_at', q.info->>'updated_at'
               ORDER BY
                 q.info->>'${query.sortBy}' ${query.sortOrder.toUpperCase()}
-            `
-            } else {
-              queryStr += `
+            `;
+                        }
+                        else {
+                            queryStr += `
               GROUP BY
                 q.id, q.type, q.info->>'created_at', q.info->>'updated_at'
               ORDER BY
                 q.${query.sortBy} ${query.sortOrder.toUpperCase()}
-            `
-            }
-          }
-        } else {
-          queryStr += `
+            `;
+                        }
+                    }
+                }
+                else {
+                    queryStr += `
           GROUP BY
             q.id, q.type, q.info->>'created_at', q.info->>'updated_at'
           ORDER BY
             MAX(q.info->>'updated_at') DESC
-        `
-        }
-        const preResult = yield this.client.query(queryStr, queryParams)
-        const totalRecords =
-          (_a = preResult.rows[0].total_records) !== null && _a !== void 0
-            ? _a
-            : 0
-        const pageSize = parseInt(query.pageSize) || 10
-        const totalPages = Math.ceil(totalRecords / pageSize)
-        const page = parseInt(query.page) || 1
-        const offset = parseInt(query.offset) || (page - 1) * pageSize
-        const limit = parseInt(query.limit) || pageSize
-        queryParams.push(limit, offset)
-        queryStr += ` LIMIT $${queryParams.length - 1} OFFSET $${
-          queryParams.length
-        }`
-        const result = yield this.client.query(queryStr, queryParams)
-        const queuesDetails = result.rows.map(row => ({
-          id: row.queue_id,
-          type: row.queue_type,
-          tags: row.tags,
-          totalPages: row.total_pages,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-          totalTasks: row.total_tasks,
-        }))
-        return {
-          total_pages: totalPages,
-          data: queuesDetails,
-        }
-      } catch (err) {
-        console.error("Error in allQueueDetails:", err)
-        return 0
-      }
-    })
-  }
-  /**
-   * Returns the details of a specific queue.
-   * @returns {object} The details of the queue.
-   */
-  getQueueDetails(queue, query) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        let queryStr = `
+        `;
+                }
+                const preResult = yield this.client.query(queryStr, queryParams);
+                const totalRecords = (_a = preResult.rows[0].total_records) !== null && _a !== void 0 ? _a : 0;
+                const pageSize = parseInt(query.pageSize) || 10;
+                const totalPages = Math.ceil(totalRecords / pageSize);
+                const page = parseInt(query.page) || 1;
+                const offset = parseInt(query.offset) || (page - 1) * pageSize;
+                const limit = parseInt(query.limit) || pageSize;
+                queryParams.push(limit, offset);
+                queryStr += ` LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`;
+                const result = yield this.client.query(queryStr, queryParams);
+                const queuesDetails = result.rows.map(row => ({
+                    id: row.queue_id,
+                    type: row.queue_type,
+                    tags: row.tags,
+                    totalPages: row.total_pages,
+                    createdAt: row.created_at,
+                    updatedAt: row.updated_at,
+                    totalTasks: row.total_tasks,
+                }));
+                return {
+                    total_pages: totalPages,
+                    data: queuesDetails,
+                };
+            }
+            catch (err) {
+                console.error("Error in allQueueDetails:", err);
+                return 0;
+            }
+        });
+    }
+    /**
+     * Returns the details of a specific queue.
+     * @returns {object} The details of the queue.
+     */
+    getQueueDetails(queue, query) {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                let queryStr = `
       SELECT
         q.id AS queue_id,
         q.type,
@@ -901,92 +848,61 @@ class QueryManager {
       WHERE
         q.id = $1
 
-    `
-        if (query.status) {
-          queryStr += " AND t.status = $2"
-        }
-        queryStr += `
+    `;
+                if (query.status) {
+                    queryStr += " AND t.status = $2";
+                }
+                queryStr += `
       GROUP BY
         q.id, q.type, q.tags, q.options, q.info, q.notes
       ORDER BY
         q.id
-    `
-        const parameters = query.status
-          ? [
-              Number(queue),
-              query === null || query === void 0 ? void 0 : query.status,
-            ]
-          : [queue]
-        const result = yield this.client.query(queryStr, parameters)
-        const queryResult = {
-          queue_id:
-            (_a = result.rows[0]) === null || _a === void 0
-              ? void 0
-              : _a.queue_id,
-          tags:
-            (_b = result.rows[0]) === null || _b === void 0 ? void 0 : _b.tags,
-          options:
-            (_c = result.rows[0]) === null || _c === void 0
-              ? void 0
-              : _c.options,
-          created_at:
-            (_d = result.rows[0]) === null || _d === void 0
-              ? void 0
-              : _d.created_at,
-          updated_at:
-            (_e = result.rows[0]) === null || _e === void 0
-              ? void 0
-              : _e.updated_at,
-          notes:
-            (_f = result.rows[0]) === null || _f === void 0 ? void 0 : _f.notes,
-          tasks:
-            (_g = result.rows[0]) === null || _g === void 0 ? void 0 : _g.tasks,
-          total_tasks:
-            (_h = result.rows[0]) === null || _h === void 0
-              ? void 0
-              : _h.total_tasks,
-          completed_tasks:
-            (_j = result.rows[0]) === null || _j === void 0
-              ? void 0
-              : _j.completed_tasks,
-          error_tasks:
-            (_k = result.rows[0]) === null || _k === void 0
-              ? void 0
-              : _k.error_tasks,
-          processing_tasks:
-            (_l = result.rows[0]) === null || _l === void 0
-              ? void 0
-              : _l.processing_tasks,
-        }
-        return queryResult
-      } catch (err) {
-        console.error("Error in getRecentQueues:", err)
-        return 0
-      }
-    })
-  }
-  //
-  ///
-  ///
-  //
-  ///
-  //
-  //
-  //
-  //
-  //
-  //
-  ///
-  //
-  //
-  ///
-  //
-  //
-  queueAndTasksCounts() {
-    var _a, _b, _c
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr = `
+    `;
+                const parameters = query.status ? [Number(queue), query === null || query === void 0 ? void 0 : query.status] : [queue];
+                const result = yield this.client.query(queryStr, parameters);
+                const queryResult = {
+                    queue_id: (_a = result.rows[0]) === null || _a === void 0 ? void 0 : _a.queue_id,
+                    tags: (_b = result.rows[0]) === null || _b === void 0 ? void 0 : _b.tags,
+                    options: (_c = result.rows[0]) === null || _c === void 0 ? void 0 : _c.options,
+                    created_at: (_d = result.rows[0]) === null || _d === void 0 ? void 0 : _d.created_at,
+                    updated_at: (_e = result.rows[0]) === null || _e === void 0 ? void 0 : _e.updated_at,
+                    notes: (_f = result.rows[0]) === null || _f === void 0 ? void 0 : _f.notes,
+                    tasks: (_g = result.rows[0]) === null || _g === void 0 ? void 0 : _g.tasks,
+                    total_tasks: (_h = result.rows[0]) === null || _h === void 0 ? void 0 : _h.total_tasks,
+                    completed_tasks: (_j = result.rows[0]) === null || _j === void 0 ? void 0 : _j.completed_tasks,
+                    error_tasks: (_k = result.rows[0]) === null || _k === void 0 ? void 0 : _k.error_tasks,
+                    processing_tasks: (_l = result.rows[0]) === null || _l === void 0 ? void 0 : _l.processing_tasks,
+                };
+                return queryResult;
+            }
+            catch (err) {
+                console.error("Error in getRecentQueues:", err);
+                return 0;
+            }
+        });
+    }
+    //
+    ///
+    ///
+    //
+    ///
+    //
+    //
+    //
+    //
+    //
+    //
+    ///
+    //
+    //
+    ///
+    //
+    //
+    queueAndTasksCounts() {
+        var _a, _b, _c;
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr = `
       SELECT
       (SELECT COUNT(id) FROM tasks) AS total_tasks,
       (SELECT COUNT(id)
@@ -1002,33 +918,25 @@ class QueryManager {
        )
        LIMIT 1) AS ongoing_queues;
     
-    `
-        const result = yield this.client.query(queryStr)
-        const queuesResult = {
-          total_tasks:
-            (_a = result.rows[0].total_tasks) !== null && _a !== void 0
-              ? _a
-              : 0,
-          pending_tasks:
-            (_b = result.rows[0].pending_tasks) !== null && _b !== void 0
-              ? _b
-              : 0,
-          ongoing_queues:
-            (_c = result.rows[0].ongoing_queues) !== null && _c !== void 0
-              ? _c
-              : [],
-        }
-        return queuesResult
-      } catch (err) {
-        console.error("Error in queueCounts:", err)
-        return 0
-      }
-    })
-  }
-  TasksDetailsOfQueues(queues) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr = `
+    `;
+                const result = yield this.client.query(queryStr);
+                const queuesResult = {
+                    total_tasks: (_a = result.rows[0].total_tasks) !== null && _a !== void 0 ? _a : 0,
+                    pending_tasks: (_b = result.rows[0].pending_tasks) !== null && _b !== void 0 ? _b : 0,
+                    ongoing_queues: (_c = result.rows[0].ongoing_queues) !== null && _c !== void 0 ? _c : [],
+                };
+                return queuesResult;
+            }
+            catch (err) {
+                console.error("Error in queueCounts:", err);
+                return 0;
+            }
+        });
+    }
+    TasksDetailsOfQueues(queues) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr = `
 
       WITH QueueTasks AS (
         SELECT
@@ -1060,36 +968,38 @@ class QueryManager {
       FROM
         QueueTasks qt;
       
-    `
-        const result = yield this.client.query(queryStr, [queues])
-        if (result.rows.length > 0) {
-          const queuesDetails = result.rows.map(row => {
-            const queueDetails = row.queue_details
-            return {
-              id: queueDetails.queue_id,
-              type: queueDetails.queue_type,
-              totalTasks: queueDetails.total_tasks,
-              availableTasks: queueDetails.available_tasks,
-              processingTasks: queueDetails.processing_tasks,
-              completedTasks: queueDetails.completed_or_error_tasks,
-              errorTasks: queueDetails.error_tasks,
+    `;
+                const result = yield this.client.query(queryStr, [queues]);
+                if (result.rows.length > 0) {
+                    const queuesDetails = result.rows.map((row) => {
+                        const queueDetails = row.queue_details;
+                        return {
+                            id: queueDetails.queue_id,
+                            type: queueDetails.queue_type,
+                            totalTasks: queueDetails.total_tasks,
+                            availableTasks: queueDetails.available_tasks,
+                            processingTasks: queueDetails.processing_tasks,
+                            completedTasks: queueDetails.completed_or_error_tasks,
+                            errorTasks: queueDetails.error_tasks,
+                        };
+                    });
+                    return queuesDetails;
+                }
+                else {
+                    return [];
+                }
             }
-          })
-          return queuesDetails
-        } else {
-          return []
-        }
-      } catch (err) {
-        console.error("Error in TasksDetailsOfQueues:", err)
-        return []
-      }
-    })
-  }
-  completedQueues() {
-    var _a
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        const queryStr = `
+            catch (err) {
+                console.error("Error in TasksDetailsOfQueues:", err);
+                return [];
+            }
+        });
+    }
+    completedQueues() {
+        var _a;
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const queryStr = `
 
       SELECT ARRAY(
         SELECT DISTINCT q.id
@@ -1101,82 +1011,84 @@ class QueryManager {
             AND t.status NOT IN ('completed', 'error')
         )
       ) AS completed_queue_ids;     
-   `
-        const result = yield this.client.query(queryStr)
-        const queuesResult = {
-          completed_queues:
-            (_a = result.rows[0].completed_queue_ids) !== null && _a !== void 0
-              ? _a
-              : [],
-        }
-        return queuesResult
-      } catch (err) {
-        console.error("Error in completedQueues:", err)
-        return []
-      }
-    })
-  }
-  TaskDetailsOfQueue(queue, query) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        let queryStr = `
+   `;
+                const result = yield this.client.query(queryStr);
+                const queuesResult = {
+                    completed_queues: (_a = result.rows[0].completed_queue_ids) !== null && _a !== void 0 ? _a : [],
+                };
+                return queuesResult;
+            }
+            catch (err) {
+                console.error("Error in completedQueues:", err);
+                return [];
+            }
+        });
+    }
+    TaskDetailsOfQueue(queue, query) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                let queryStr = `
 
       SELECT *
       FROM tasks
       WHERE queue_id = $1
     
- `
-        if (query.viewAll === "true") {
-          queryStr = queryStr.replace("LIMIT 10", "")
-        } else {
-          queryStr += "LIMIT 10"
-        }
-        const result = yield this.client.query(queryStr, [queue])
-        const queuesResult = result.rows
-        return queuesResult
-      } catch (err) {
-        console.error("Error in completedQueues:", err)
-        return []
-      }
-    })
-  }
-  TasksCompletedWithinAnHour() {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        let queryStr = `
+ `;
+                if (query.viewAll === "true") {
+                    queryStr = queryStr.replace("LIMIT 10", "");
+                }
+                else {
+                    queryStr += "LIMIT 10";
+                }
+                const result = yield this.client.query(queryStr, [queue]);
+                const queuesResult = result.rows;
+                return queuesResult;
+            }
+            catch (err) {
+                console.error("Error in completedQueues:", err);
+                return [];
+            }
+        });
+    }
+    TasksCompletedWithinAnHour() {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                let queryStr = `
 
       SELECT COUNT(*)
       FROM tasks
       WHERE end_time >= NOW() - INTERVAL '1 hour';
       
- `
-        const result = yield this.client.query(queryStr)
-        const queuesResult = result.rows
-        return queuesResult
-      } catch (err) {
-        console.error("Error in completedQueues:", err)
-        return []
-      }
-    })
-  }
-  getParamAndResult(taskId) {
-    return __awaiter(this, void 0, void 0, function* () {
-      try {
-        let queryStr = `
+ `;
+                const result = yield this.client.query(queryStr);
+                const queuesResult = result.rows;
+                return queuesResult;
+            }
+            catch (err) {
+                console.error("Error in completedQueues:", err);
+                return [];
+            }
+        });
+    }
+    getParamAndResult(taskId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                let queryStr = `
 
       SELECT params, result
       FROM tasks
       WHERE task_id = $1
       LIMIT 1;
- `
-        const result = yield this.client.query(queryStr, [taskId])
-        const queuesResult = result.rows
-        return queuesResult
-      } catch (err) {
-        console.error("Error in completedQueues:", err)
-        return []
-      }
-    })
-  }
+ `;
+                const result = yield this.client.query(queryStr, [taskId]);
+                const queuesResult = result.rows;
+                return queuesResult;
+            }
+            catch (err) {
+                console.error("Error in completedQueues:", err);
+                return [];
+            }
+        });
+    }
 }
-exports.QueryManager = QueryManager
+exports.QueryManager = QueryManager;
