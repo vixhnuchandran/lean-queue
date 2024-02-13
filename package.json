@@ -4,7 +4,7 @@
   "description": "",
   "main": "./dist/server.js",
   "scripts": {
-    "start": "nodemon --exec  ts-node ./src/server.ts",
+    "start": "nodemon src/server.ts",
     "build": "tsc -w",
     "test": "npx jest"
   },
