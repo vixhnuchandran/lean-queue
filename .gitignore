@@ -14,5 +14,4 @@ dashboard/.prettierrc
 dashboard/sample.js
 lean-queue-ts.code-workspace
 /utils/logger.ts
-src/private.key
-src/certificate.crt
+certificates/
