@@ -16,6 +16,15 @@ app.use(middlewares.attachRequestId)
 app.use(middlewares.attachQueryManager)
 
 // Routes
+app.get(
+  "/.well-known/pki-validation/4B5F0EFAFFE49730185FB1FAFC6127AC.txt",
+  (req: Request, res: Response) => {
+    return res.sendFile(
+      "/home/ubuntu/lean-queue/src/4B5F0EFAFFE49730185FB1FAFC6127AC.txt"
+    )
+  }
+)
+
 app.use("/", routes)
 
 app.get("/", (req: Request, res: Response) => {
