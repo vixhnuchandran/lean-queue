@@ -310,6 +310,7 @@ const getResults = (req, res, next) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.getResults = getResults;
+//
 const status = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const requestId = req.requestId;
     console.log({ message: `Incoming client request for 'status'`, requestId });
