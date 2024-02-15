@@ -10,8 +10,6 @@ try {
   const certPath = path.resolve(__dirname, "certificate.crt")
   const cert = fs.readFileSync(certPath)
 
-  console.log(key)
-
   const cred = {
     key,
     cert,
