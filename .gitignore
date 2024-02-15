@@ -13,3 +13,6 @@ dashboard/.gitignore
 dashboard/.prettierrc
 dashboard/sample.js
 lean-queue-ts.code-workspace
+/utils/logger.ts
+certificate.crt
+private.key
