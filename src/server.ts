@@ -4,10 +4,10 @@ import fs from "fs"
 import https from "https"
 import path from "path"
 try {
-  const keyPath = path.resolve(__dirname, "private.key")
+  const keyPath = path.resolve(__dirname, "../certificates", "private.key")
   const key = fs.readFileSync(keyPath)
 
-  const certPath = path.resolve(__dirname, "certificate.crt")
+  const certPath = path.resolve(__dirname, "../certificates", "certificate.crt")
   const cert = fs.readFileSync(certPath)
 
   const cred = {
