@@ -4,9 +4,9 @@ import { StatusCodes } from "http-status-codes"
 import * as middlewares from "./middlewares"
 import cors from "cors"
 import routes from "./routes/routes"
+
 const app: Application = express()
 
-// middlewares
 app.use(cors())
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json({ limit: "50mb" }))
@@ -16,14 +16,6 @@ app.use(middlewares.attachRequestId)
 app.use(middlewares.attachQueryManager)
 
 // Routes
-app.get(
-  "/.well-known/pki-validation/4B5F0EFAFFE49730185FB1FAFC6127AC.txt",
-  (req: Request, res: Response) => {
-    return res.sendFile(
-      "/home/ubuntu/lean-queue/src/4B5F0EFAFFE49730185FB1FAFC6127AC.txt"
-    )
-  }
-)
 
 app.use("/", routes)
 
