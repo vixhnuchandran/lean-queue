@@ -1,0 +1,21 @@
+{
+    "name": "motionsmith",
+    "version": "1.0.0",
+    "description": "",
+    "main": "./dist/main.js",
+    "scripts": {
+        "start": "node ./dist/main.js",
+        "build": "tsc -w"
+    },
+    "keywords": [],
+    "author": "vixhnuchandran",
+    "license": "ISC",
+    "devDependencies": {
+        "typescript": "^5.3.3"
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.39.7",
+        "dotenv": "^16.4.5",
+        "winston": "^3.11.0"
+    }
+}
