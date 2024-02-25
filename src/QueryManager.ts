@@ -5,192 +5,215 @@ import { logger } from "./utils/logger"
 import { SubmitResultsResponse } from "./types"
 
 export class QueryManager {
-  client
-  constructor(client: PoolClient) {
-    this.client = client
-  }
+    client
+    constructor(client: PoolClient) {
+        this.client = client
+    }
 
-  async getExpiryTime(queue: number) {
-    const queryStr: string = `
+    async getExpiryTime(queue: number) {
+        const queryStr: string = `
     SELECT options->>'expiryTime'
     FROM queues
     WHERE id = $1;
     `
-    const result: QueryResult<any> = await this.client.query(queryStr, [queue])
-    return parseInt(result.rows[0]["?column?"])
-  }
+        const result: QueryResult<any> = await this.client.query(queryStr, [
+            queue,
+        ])
+        return parseInt(result.rows[0]["?column?"])
+    }
 
-  async createQueue(
-    type: string,
-    tags: string[],
-    options: QueueOptions,
-    notes: string
-  ): Promise<number | null> {
-    let queue: QueryResult
-    let tagsArray: string[] | undefined
+    async createQueue(
+        type: string,
+        tags: string[],
+        options: QueueOptions,
+        notes: string
+    ): Promise<number | null> {
+        let queue: QueryResult
+        let tagsArray: string[] | undefined
 
-    try {
-      if (Array.isArray(tags) && tags.length > 0) {
-        tagsArray = tags.map((tag: string) => `${tag}`)
-      }
+        try {
+            if (Array.isArray(tags) && tags.length > 0) {
+                tagsArray = tags.map((tag: string) => `${tag}`)
+            }
 
-      const queryStr: string = `
+            const queryStr: string = `
       INSERT INTO queues (type, tags, options, info, notes) 
       VALUES ($1, $2, $3, $4, $5)
       RETURNING id;`
 
-      const info: {} = {
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      }
-      const queryParams = [type, tagsArray, options, info, notes],
-        queue = await this.client.query(queryStr, queryParams)
+            const info: {} = {
+                created_at: Date.now(),
+                updated_at: Date.now(),
+            }
+            const queryParams = [type, tagsArray, options, info, notes],
+                queue = await this.client.query(queryStr, queryParams)
 
-      return queue.rows[0].id
-    } catch (err: any) {
-      console.error({ message: `'createQueue' ${err.message}` })
-      return null
+            return queue.rows[0].id
+        } catch (err: any) {
+            logger.error({ message: `'createQueue' ${err.message}` })
+            return null
+        }
     }
-  }
 
-  async createQueueAndAddTasks(
-    type: string,
-    tasks: Task[],
-    tags: string[],
-    options: QueueOptions,
-    notes: string
-  ): Promise<{ queue: number; numTasks: number } | null> {
-    let queue: any
-    let numTasks: any
-
-    try {
-      queue = await this.createQueue(type, tags, options, notes)
-
-      if (queue) {
-        await this.client.query("BEGIN")
-        numTasks = await this.addTasks(queue, tasks, options)
-      } else {
-        console.error({
-          message: "createQueue operation did not return a valid queue.",
-        })
-      }
-      return { queue, numTasks }
-    } catch (err: any) {
-      await this.deleteQueue(queue)
-      await this.client.query("ROLLBACK")
-      console.error({
-        message: `error in 'createQueueAndAddTasks': ${err.message}`,
-      })
-      return null
-    }
-  }
-
-  async addTasks(
-    queue: number,
-    tasks: Task[],
-    options?: QueueOptions
-  ): Promise<number | undefined> {
-    try {
-      const batchSize: number = 4096
-      const totalEntries: any = Object.entries(tasks)
-      const totalBatches: number = Math.ceil(totalEntries.length / batchSize)
-
-      let successfulBatches: number = 0
-
-      const currentTime: Date = new Date()
-      let expiryTime: Date
-
-      if (options && options.expiryTime !== undefined) {
-        expiryTime = new Date(currentTime.getTime() + options.expiryTime)
-      } else {
-        const expiryTimeFromQueue =
-          (await this.getExpiryTime(queue)) || 2 * 60 * 1000 // 2min default
-        expiryTime = new Date(currentTime.getTime() + expiryTimeFromQueue)
-      }
-
-      await this.client.query("BEGIN")
-      for (let i = 0; i < totalBatches; i++) {
-        const batchStart: number = i * batchSize
-        const batchEnd: number = (i + 1) * batchSize
-        const batch: [] = totalEntries
-          .slice(batchStart, batchEnd)
-          .map(([_, data]: any[]) => {
-            return [data.taskId, data.params, data.priority, expiryTime, queue]
-          })
+    async createQueueAndAddTasks(
+        type: string,
+        tasks: Task[],
+        tags: string[],
+        options: QueueOptions,
+        notes: string
+    ): Promise<{ queue: number; numTasks: number } | null> {
+        let queue: any
+        let numTasks: any
 
         try {
-          await this.addTasksByBatch(batch)
+            await this.client.query("BEGIN")
 
-          await this.client.query("COMMIT")
+            queue = await this.createQueue(type, tags, options, notes)
 
-          successfulBatches++
+            if (queue) {
+                numTasks = await this.addTasks(queue, tasks, options)
+            } else {
+                console.error({
+                    message:
+                        "createQueue operation did not return a valid queue.",
+                })
+            }
+            return { queue, numTasks }
         } catch (err: any) {
-          await this.client.query("ROLLBACK")
-
-          console.error({
-            message: `Error adding batch ${i + 1}: ${err.message}`,
-          })
-
-          return
+            await this.deleteQueue(queue)
+            await this.client.query("ROLLBACK")
+            console.error({
+                message: `error in 'createQueueAndAddTasks': ${err.message}`,
+            })
+            return null
         }
-      }
-
-      if (successfulBatches === totalBatches) return totalEntries.length
-      else return 0
-    } catch (err: any) {
-      await this.deleteQueue(queue)
-      console.error({ message: `error in 'addTasks': ${err.message}` })
-      return
     }
-  }
 
-  async addTasksByBatch(batch: any[] | undefined): Promise<void> {
-    try {
-      if (batch) {
-        // add-tasks,
+    async addTasks(
+        queue: number,
+        tasks: Task[],
+        options?: QueueOptions
+    ): Promise<number | null> {
+        try {
+            const batchSize: number = 4096
+            const totalEntries: any = Object.entries(tasks)
+            const totalBatches: number = Math.ceil(
+                totalEntries.length / batchSize
+            )
 
-        const queryStr: string = `
-          INSERT INTO tasks (task_id, params, priority ,expiry_time, queue_id) 
-          VALUES %L
-        `
-        await this.client.query(format(queryStr, batch))
-      }
-    } catch (err: any) {
-      console.error({ message: `error in 'addTasksByBatch': ${err.message}` })
+            let successfulBatches: number = 0
+
+            const currentTime: Date = new Date()
+            let expiryTime: Date
+
+            if (options && options.expiryTime !== undefined) {
+                expiryTime = new Date(
+                    currentTime.getTime() + options.expiryTime
+                )
+            } else {
+                const expiryTimeFromQueue =
+                    (await this.getExpiryTime(queue)) || 2 * 60 * 1000 // 2min default
+                expiryTime = new Date(
+                    currentTime.getTime() + expiryTimeFromQueue
+                )
+            }
+
+            await this.client.query("BEGIN")
+
+            for (let i = 0; i < totalBatches; i++) {
+                const batchStart: number = i * batchSize
+                const batchEnd: number = (i + 1) * batchSize
+                const batch: [] = totalEntries
+                    .slice(batchStart, batchEnd)
+                    .map(([_, data]: any[]) => {
+                        return [
+                            data.taskId,
+                            data.params,
+                            data.priority ?? parseInt("5"),
+                            expiryTime,
+                            queue,
+                            { added_at: Date.now() },
+                        ]
+                    })
+
+                try {
+                    const response = await this.addTasksByBatch(batch)
+                    await this.client.query("COMMIT")
+
+                    if (!response) return null
+
+                    successfulBatches++
+                } catch (err: any) {
+                    await this.client.query("ROLLBACK")
+
+                    console.error({
+                        message: `Error adding batch ${i + 1}: ${err.message}`,
+                    })
+
+                    return null
+                }
+            }
+
+            if (successfulBatches === totalBatches) return totalEntries.length
+            else return null
+        } catch (err: any) {
+            await this.deleteQueue(queue)
+            logger.error({ message: `Error in 'addTasks': ${err.message}` })
+            return null
+        }
     }
-  }
 
-  async deleteQueue(queue: number): Promise<void> {
-    try {
-      const queryStr: string = `
+    async addTasksByBatch(batch: any[] | undefined): Promise<boolean> {
+        try {
+            if (batch) {
+                const queryStr = `
+                INSERT INTO tasks (task_id, params, priority, expiry_time, queue_id, info) 
+                VALUES %L
+              `
+                await this.client.query(format(queryStr, batch))
+            }
+            return true
+        } catch (err: any) {
+            console.error({
+                message: `error in 'addTasksByBatch': ${err.message}`,
+            })
+            return false
+        }
+    }
+
+    async deleteQueue(queue: number): Promise<void> {
+        try {
+            const queryStr: string = `
         DELETE FROM queues
         WHERE id = ${queue};
         `
-      await this.client.query(queryStr)
-    } catch (err: any) {
-      console.error({ message: `error in 'deleteQueue': ${err.message}` })
+            await this.client.query(queryStr)
+        } catch (err: any) {
+            logger.error({ message: `error in 'deleteQueue': ${err.message}` })
+        }
     }
-  }
 
-  async deleteEverything(): Promise<void> {
-    try {
-      const queryStr: string = `
+    async deleteEverything(): Promise<void> {
+        try {
+            const queryStr: string = `
       TRUNCATE TABLE tasks, queues RESTART IDENTITY
         `
-      await this.client.query(queryStr)
-      console.log("Deleted everything successfully")
-    } catch (err: any) {
-      console.error({ message: `error in 'deleteEverything': ${err.message}` })
+            await this.client.query(queryStr)
+            console.log("Deleted everything successfully")
+        } catch (err: any) {
+            console.error({
+                message: `error in 'deleteEverything': ${err.message}`,
+            })
+        }
     }
-  }
 
-  async getNextAvailableTaskByQueue(queue: number): Promise<any> {
-    let data = null
-    try {
-      await this.client.query("BEGIN")
+    async getNextAvailableTaskByQueue(queue: number): Promise<any> {
+        let data = null
+        try {
+            await this.client.query("BEGIN")
 
-      const queryStr = format(
-        `
+            const queryStr = format(
+                `
         SELECT tasks.*, queues.type as queue_type
         FROM tasks
         JOIN queues ON tasks.queue_id = queues.id
@@ -200,44 +223,46 @@ export class QueryManager {
         ORDER BY (tasks.priority)::int DESC
         LIMIT 1;
       `,
-        queue
-      )
+                queue
+            )
 
-      const result: QueryResult = await this.client.query(queryStr)
+            const result: QueryResult = await this.client.query(queryStr)
 
-      data = result.rows[0]
+            data = result.rows[0]
 
-      if (!data) {
-        console.log("No tasks available right now!")
-      } else if (data) {
-        const queryStr: string = format(
-          `
+            if (!data) {
+                console.log("No tasks available right now!")
+            } else if (data) {
+                const queryStr: string = format(
+                    `
           UPDATE tasks
           SET status = 'processing', start_time = CURRENT_TIMESTAMP
           WHERE id = %L;
            `,
-          data.id
-        )
+                    data.id
+                )
 
-        await this.client.query(queryStr)
-      }
-      await this.client.query("COMMIT")
+                await this.client.query(queryStr)
+            }
+            await this.client.query("COMMIT")
 
-      return data
-    } catch (err: any) {
-      await this.client.query("ROLLBACK")
-      console.error({ message: `Error in getNextTaskByQueue: ${err.message}` })
-      return null
+            return data
+        } catch (err: any) {
+            await this.client.query("ROLLBACK")
+            console.error({
+                message: `Error in getNextTaskByQueue: ${err.message}`,
+            })
+            return null
+        }
     }
-  }
 
-  async getNextAvailableTaskByType(type: string) {
-    let data = null
-    try {
-      await this.client.query("BEGIN")
+    async getNextAvailableTaskByType(type: string) {
+        let data = null
+        try {
+            await this.client.query("BEGIN")
 
-      const queryStr: string = format(
-        `
+            const queryStr: string = format(
+                `
         SELECT tasks.*
         FROM tasks
         JOIN queues ON tasks.queue_id = queues.id
@@ -246,42 +271,46 @@ export class QueryManager {
                (tasks.status = 'processing' AND tasks.expiry_time < NOW()))
         ORDER BY (tasks.priority)::int DESC
         LIMIT 1;`,
-        type
-      )
+                type
+            )
 
-      const result: QueryResult = await this.client.query(queryStr)
+            const result: QueryResult = await this.client.query(queryStr)
 
-      data = result.rows[0]
-      if (!data) {
-        console.log("No tasks available right now!")
-      } else {
-        const queryStr: string = `
+            data = result.rows[0]
+            if (!data) {
+                console.log("No tasks available right now!")
+            } else {
+                const queryStr: string = `
           UPDATE tasks SET status = 'processing', start_time =  CURRENT_TIMESTAMP
           WHERE id = ${data.id};
           `
-        await this.client.query(queryStr)
+                await this.client.query(queryStr)
 
-        await this.client.query("COMMIT")
-      }
-      return data
-    } catch (err: any) {
-      await this.client.query("ROLLBACK")
+                await this.client.query("COMMIT")
+            }
+            return data
+        } catch (err: any) {
+            await this.client.query("ROLLBACK")
 
-      console.error({ message: `Error in getNextTaskByType: ${err.message}` })
-      return null
+            console.error({
+                message: `Error in getNextTaskByType: ${err.message}`,
+            })
+            return null
+        }
     }
-  }
 
-  async getNextAvailableTaskByTags(tags: string[]) {
-    let data = null
-    try {
-      let tagsArray: string[] = Array.isArray(tags) ? tags : JSON.parse(tags)
-      const tagsCondition = tagsArray.map(tag => `${tag}`)
+    async getNextAvailableTaskByTags(tags: string[]) {
+        let data = null
+        try {
+            let tagsArray: string[] = Array.isArray(tags)
+                ? tags
+                : JSON.parse(tags)
+            const tagsCondition = tagsArray.map(tag => `${tag}`)
 
-      await this.client.query("BEGIN")
+            await this.client.query("BEGIN")
 
-      const queryStr: string = format(
-        `
+            const queryStr: string = format(
+                `
           SELECT tasks.*, queues.type as queue_type
           FROM tasks
           JOIN queues ON tasks.queue_id = queues.id
@@ -291,41 +320,43 @@ export class QueryManager {
           ORDER BY (tasks.priority)::int DESC
           LIMIT 1;
         `,
-        tagsCondition
-      )
+                tagsCondition
+            )
 
-      const result: QueryResult = await this.client.query(queryStr)
+            const result: QueryResult = await this.client.query(queryStr)
 
-      data = result.rows[0]
-      if (!data) {
-        console.log("No tasks available right now!")
-      } else if (data) {
-        const queryStr: string = `
+            data = result.rows[0]
+            if (!data) {
+                console.log("No tasks available right now!")
+            } else if (data) {
+                const queryStr: string = `
           UPDATE tasks SET status = 'processing', start_time =  CURRENT_TIMESTAMP
           WHERE id = ${data.id};
           `
-        await this.client.query(queryStr)
+                await this.client.query(queryStr)
 
-        await this.client.query("COMMIT")
-      }
-      return data
-    } catch (err: any) {
-      await this.client.query("ROLLBACK")
+                await this.client.query("COMMIT")
+            }
+            return data
+        } catch (err: any) {
+            await this.client.query("ROLLBACK")
 
-      console.error({ message: `Error in getNextTaskByTags: ${err.message}` })
+            console.error({
+                message: `Error in getNextTaskByTags: ${err.message}`,
+            })
 
-      return null
+            return null
+        }
     }
-  }
 
-  async submitResults(
-    id: number,
-    result: {},
-    error: {}
-  ): Promise<SubmitResultsResponse | null> {
-    try {
-      const resultObj: {} = error ? { error } : { result }
-      const queryStr: string = `
+    async submitResults(
+        id: number,
+        result: {},
+        error: {}
+    ): Promise<SubmitResultsResponse | null> {
+        try {
+            const resultObj: {} = error ? { error } : { result }
+            const queryStr: string = `
           UPDATE tasks 
           SET 
             status = CASE
@@ -338,39 +369,41 @@ export class QueryManager {
           WHERE tasks.id = $3 AND queues.id = tasks.queue_id
           RETURNING tasks.queue_id, queues.options->>'callback' AS callback_url;
         `
-      const queryStr2: string = `
+            const queryStr2: string = `
       UPDATE queues
       SET info = jsonb_set(info, '{updated_at}', to_jsonb(EXTRACT(EPOCH FROM NOW()) * 1000)::text::jsonb, true)
       WHERE id = $1;
       
       
       `
-      await this.client.query("BEGIN")
+            await this.client.query("BEGIN")
 
-      const response: QueryResult = await this.client.query(queryStr, [
-        error,
-        JSON.stringify(resultObj),
-        id,
-      ])
+            const response: QueryResult = await this.client.query(queryStr, [
+                error,
+                JSON.stringify(resultObj),
+                id,
+            ])
 
-      const queue: number = response.rows[0].queue_id
+            const queue: number = response.rows[0].queue_id
 
-      await this.client.query(queryStr2, [queue])
+            await this.client.query(queryStr2, [queue])
 
-      const callbackUrl: string = response.rows[0].callback_url
+            const callbackUrl: string = response.rows[0].callback_url
 
-      await this.client.query("COMMIT")
-      return { queue, callbackUrl }
-    } catch (err: any) {
-      await this.client.query("ROLLBACK")
-      console.error({ message: `error in 'submitResults' : ${err.message}` })
-      return null
+            await this.client.query("COMMIT")
+            return { queue, callbackUrl }
+        } catch (err: any) {
+            await this.client.query("ROLLBACK")
+            console.error({
+                message: `error in 'submitResults' : ${err.message}`,
+            })
+            return null
+        }
     }
-  }
 
-  async getStatus(queue: number) {
-    try {
-      const queryStr: string = `
+    async getStatus(queue: number) {
+        try {
+            const queryStr: string = `
         SELECT 
             COUNT(task_id) AS total_jobs,
             SUM(CASE WHEN status = 'completed' OR status = 'error' THEN 1 ELSE 0 END) AS completed_count,
@@ -379,145 +412,146 @@ export class QueryManager {
         WHERE queue_id = ${queue} ;
          `
 
-      const response: QueryResult = await this.client.query(queryStr)
+            const response: QueryResult = await this.client.query(queryStr)
 
-      return response.rows[0]
-    } catch (err: any) {
-      console.error({ message: `error in 'getStatus': ${err.message}` })
+            return response.rows[0]
+        } catch (err: any) {
+            logger.error({ message: `error in 'getStatus': ${err.message}` })
+        }
     }
-  }
 
-  async checkQueue(
-    field: string,
-    value: string | number
-  ): Promise<{ id: number; type: string | null } | null> {
-    try {
-      const queryStr = `
+    async checkQueue(
+        field: string,
+        value: string | number
+    ): Promise<{ id: number; type: string | null } | null> {
+        try {
+            const queryStr = `
         SELECT id, type
         FROM queues
         WHERE ${field} = $1;
       `
-      const response = await this.client.query(queryStr, [value])
-      const queueData = response.rows[0] || null
-      return queueData
-    } catch (err: any) {
-      console.error({ message: `Error in 'checkQueue': ${err.message}` })
-      return null
+            const response = await this.client.query(queryStr, [value])
+            const queueData = response.rows[0] || null
+            return queueData
+        } catch (err: any) {
+            logger.error({ message: `Error in 'checkQueue': ${err.message}` })
+            return null
+        }
     }
-  }
 
-  async getResults(
-    queue: number | string
-  ): Promise<{ [taskId: string]: any } | null> {
-    let results: { [taskId: string]: any } = {}
-    try {
-      const queryStr = `
+    async getResults(
+        queue: number | string
+    ): Promise<{ [taskId: string]: any } | null> {
+        let results: { [taskId: string]: any } = {}
+        try {
+            const queryStr = `
         SELECT task_id, result
         FROM tasks
         WHERE status IN ('completed', 'error') 
           AND queue_id = ${queue};
       `
-      const response = await this.client.query(queryStr)
+            const response = await this.client.query(queryStr)
 
-      if (response.rows.length === 0) {
-        return null
-      }
+            if (response.rows.length === 0) {
+                return null
+            }
 
-      response.rows.forEach(row => {
-        results[row.task_id] = row.result
-      })
-    } catch (err: any) {
-      console.error({ message: `error in 'getResults': ${err.message}` })
-    }
-    return results
-  }
-
-  async postResults(url: string, results: {}): Promise<void> {
-    try {
-      await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(results),
-      })
-    } catch (err: any) {
-      console.error({ message: `error in 'postResults': ${err.message}` })
-    }
-  }
-
-  async areAllTasksCompleted(queue: number): Promise<boolean> {
-    let areCompleted: boolean = false
-
-    let totalTasks: QueryResult, completedTasks: QueryResult
-
-    if (queue) {
-      totalTasks = await this.totalTaskCountInQueue(queue)
-
-      completedTasks = await this.completedTaskCountInQueue(queue)
-
-      if (totalTasks.rows[0].count === completedTasks.rows[0].count) {
-        areCompleted = true
-      }
+            response.rows.forEach(row => {
+                results[row.task_id] = row.result
+            })
+        } catch (err: any) {
+            logger.error({ message: `error in 'getResults': ${err.message}` })
+        }
+        return results
     }
 
-    return areCompleted
-  }
+    async postResults(url: string, results: {}): Promise<void> {
+        try {
+            await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(results),
+            })
+        } catch (err: any) {
+            logger.error({ message: `error in 'postResults': ${err.message}` })
+        }
+    }
 
-  async totalTaskCountInQueue(queue: number): Promise<QueryResult> {
-    try {
-      const queryStr: string = `
+    async areAllTasksCompleted(queue: number): Promise<boolean> {
+        let areCompleted: boolean = false
+
+        let totalTasks: QueryResult, completedTasks: QueryResult
+
+        if (queue) {
+            totalTasks = await this.totalTaskCountInQueue(queue)
+
+            completedTasks = await this.completedTaskCountInQueue(queue)
+
+            if (totalTasks.rows[0].count === completedTasks.rows[0].count) {
+                areCompleted = true
+            }
+        }
+
+        return areCompleted
+    }
+
+    async totalTaskCountInQueue(queue: number): Promise<QueryResult> {
+        try {
+            const queryStr: string = `
         SELECT COUNT(*) FROM tasks 
         WHERE queue_id = ${queue}
       `
 
-      const response: QueryResult = await this.client.query(queryStr)
+            const response: QueryResult = await this.client.query(queryStr)
 
-      return response
-    } catch (error: any) {
-      console.error("Error querying the database:", error.message)
-      throw error
+            return response
+        } catch (error: any) {
+            console.error("Error querying the database:", error.message)
+            throw error
+        }
     }
-  }
 
-  async completedTaskCountInQueue(queue: number): Promise<QueryResult> {
-    const queryStr: string = `
+    async completedTaskCountInQueue(queue: number): Promise<QueryResult> {
+        const queryStr: string = `
         SELECT COUNT(*) FROM tasks 
         WHERE queue_id = ${queue} 
           AND status IN ('completed', 'error')
         `
-    const response: QueryResult = await this.client.query(queryStr)
+        const response: QueryResult = await this.client.query(queryStr)
 
-    return response
-  }
+        return response
+    }
 
-  //---------------------------------------------------------------------------------------------
-  // -----------------------------------------------------------------------------------
-  //----------------------------   Dashboard data functions  ----------------------------
-  //----------------------------------------------------------------------------------------------
-  //---------------------------------------------------------------------------------------------
+    //---------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------
+    //----------------------------   Dashboard data functions  ----------------------------
+    //----------------------------------------------------------------------------------------------
+    //---------------------------------------------------------------------------------------------
 
-  /**
-   * Returns the statistics of the tasks in the system.
-   * @returns An object containing the total number of tasks,
-   *  the number of tasks added in the last hour, the number of pending tasks,
-   *  the number of completed tasks, the number of successful tasks, and the number of errored tasks.
-   */
-  async getTasksStats(timeInterval: string): Promise<
-    | {
-        totalTasks: number
-        addedTasks: number
-        pendingTasks: number
-        completedTasks: number
-        successTasks: number
-        errorTasks: number
-      }
-    | number
-  > {
-    try {
-      let defaultInterval = timeInterval == "" ? "5000 years" : timeInterval
+    /**
+     * Returns the statistics of the tasks in the system.
+     * @returns An object containing the total number of tasks,
+     *  the number of tasks added in the last hour, the number of pending tasks,
+     *  the number of completed tasks, the number of successful tasks, and the number of errored tasks.
+     */
+    async getTasksStats(timeInterval: string): Promise<
+        | {
+              totalTasks: number
+              addedTasks: number
+              pendingTasks: number
+              completedTasks: number
+              successTasks: number
+              errorTasks: number
+          }
+        | number
+    > {
+        try {
+            let defaultInterval =
+                timeInterval == "" ? "5000 years" : timeInterval
 
-      const queryStr: string = `
+            const queryStr: string = `
     SELECT 
       COUNT(*) AS total_tasks, 
       COUNT(
@@ -547,48 +581,48 @@ export class QueryManager {
     FROM 
       tasks;`
 
-      const result: QueryResult = await this.client.query(queryStr)
+            const result: QueryResult = await this.client.query(queryStr)
 
-      const queryResult: {
-        totalTasks: number
-        addedTasks: number
-        pendingTasks: number
-        completedTasks: number
-        successTasks: number
-        errorTasks: number
-      } = {
-        totalTasks: result.rows[0].total_tasks,
-        addedTasks: result.rows[0].added_tasks,
-        pendingTasks: result.rows[0].pending_tasks,
-        completedTasks: result.rows[0].completed_tasks,
-        successTasks: result.rows[0].success_tasks,
-        errorTasks: result.rows[0].error_tasks,
-      }
+            const queryResult: {
+                totalTasks: number
+                addedTasks: number
+                pendingTasks: number
+                completedTasks: number
+                successTasks: number
+                errorTasks: number
+            } = {
+                totalTasks: result.rows[0].total_tasks,
+                addedTasks: result.rows[0].added_tasks,
+                pendingTasks: result.rows[0].pending_tasks,
+                completedTasks: result.rows[0].completed_tasks,
+                successTasks: result.rows[0].success_tasks,
+                errorTasks: result.rows[0].error_tasks,
+            }
 
-      return queryResult
-    } catch (err) {
-      console.error("Error in taskStats:", err)
-      return 0
+            return queryResult
+        } catch (err) {
+            console.error("Error in taskStats:", err)
+            return 0
+        }
     }
-  }
-  /**
-   * Returns the details of recent queues in the system.
-   * @returns {object} The details of recent queues.
-   */
-  async getRecentQueues(): Promise<
-    | {
-        id?: string | number
-        type?: string | number
-        completedTasks?: string | number
-        updatedAt?: string | number
-        pendingTasks?: string | number
-        avgExecTime?: string | number
-        EstCompTime?: string | number
-      }[]
-    | number
-  > {
-    try {
-      const queryStr1: string = `
+    /**
+     * Returns the details of recent queues in the system.
+     * @returns {object} The details of recent queues.
+     */
+    async getRecentQueues(): Promise<
+        | {
+              id?: string | number
+              type?: string | number
+              completedTasks?: string | number
+              updatedAt?: string | number
+              pendingTasks?: string | number
+              avgExecTime?: string | number
+              EstCompTime?: string | number
+          }[]
+        | number
+    > {
+        try {
+            const queryStr1: string = `
       WITH RecentQueues AS (
         SELECT 
           id, 
@@ -626,7 +660,7 @@ export class QueryManager {
       
     `
 
-      const queryStr2: string = `
+            const queryStr2: string = `
       WITH RecentQueues AS (
         SELECT 
           id, 
@@ -728,73 +762,73 @@ export class QueryManager {
         tc.queue_id;
       
     `
-      const result1: QueryResult = await this.client.query(queryStr1)
-      const result2: QueryResult = await this.client.query(queryStr2)
+            const result1: QueryResult = await this.client.query(queryStr1)
+            const result2: QueryResult = await this.client.query(queryStr2)
 
-      if (result1.rows.length === 0 && result2.rows.length === 0) {
-        return []
-      }
+            if (result1.rows.length === 0 && result2.rows.length === 0) {
+                return []
+            }
 
-      const joinedResults = result1.rows.map(row1 => {
-        const matchingRow2 = result2.rows.find(
-          row2 => row2.queue_id === row1.queue_id
-        )
-        return { ...row1, ...matchingRow2 }
-      })
+            const joinedResults = result1.rows.map(row1 => {
+                const matchingRow2 = result2.rows.find(
+                    row2 => row2.queue_id === row1.queue_id
+                )
+                return { ...row1, ...matchingRow2 }
+            })
 
-      const joinedResultsSorted = joinedResults.sort((a, b) => {
-        const updatedAtA = new Date(a.updated_at)
-        const updatedAtB = new Date(b.updated_at)
+            const joinedResultsSorted = joinedResults.sort((a, b) => {
+                const updatedAtA = new Date(a.updated_at)
+                const updatedAtB = new Date(b.updated_at)
 
-        return updatedAtB.getTime() - updatedAtA.getTime()
-      })
+                return updatedAtB.getTime() - updatedAtA.getTime()
+            })
 
-      const queryResult: {
-        id: string | number
-        type: string | number
-        updatedAt?: string | number
-        completedTasks?: string | number
-        pendingTasks?: string | number
-        avgExecTime?: string | number
-        EstCompTime?: string | number
-      }[] = joinedResultsSorted.map(result => ({
-        id: result.queue_id,
-        type: result.type,
-        completedTasks: result.completed_tasks_count,
-        updatedAt: result.updated_at,
-        pendingTasks: result.pending_tasks_count,
-        avgExecTime: result.avg_execution_time_completed,
-        EstCompTime: result.estimated_completion_time_pending,
-      }))
+            const queryResult: {
+                id: string | number
+                type: string | number
+                updatedAt?: string | number
+                completedTasks?: string | number
+                pendingTasks?: string | number
+                avgExecTime?: string | number
+                EstCompTime?: string | number
+            }[] = joinedResultsSorted.map(result => ({
+                id: result.queue_id,
+                type: result.type,
+                completedTasks: result.completed_tasks_count,
+                updatedAt: result.updated_at,
+                pendingTasks: result.pending_tasks_count,
+                avgExecTime: result.avg_execution_time_completed,
+                EstCompTime: result.estimated_completion_time_pending,
+            }))
 
-      return queryResult
-    } catch (err) {
-      console.error("Error in getRecentQueues:", err)
-      return 0
+            return queryResult
+        } catch (err) {
+            console.error("Error in getRecentQueues:", err)
+            return 0
+        }
     }
-  }
 
-  /**
-   * Returns the details of all queues in the system.
-   * @returns {object} The details of all queues and totalPages.
-   */
-  async allQueueDetails(query: Record<string, any>): Promise<
-    | {
-        total_pages: number
-        data: Array<{
-          id: number
-          type: string
-          tags: string[]
-          totalPages: number
-          createdAt: Date
-          updatedAt: Date
-          totalTasks: number
-        }>
-      }
-    | number
-  > {
-    try {
-      let queryStr = `
+    /**
+     * Returns the details of all queues in the system.
+     * @returns {object} The details of all queues and totalPages.
+     */
+    async allQueueDetails(query: Record<string, any>): Promise<
+        | {
+              total_pages: number
+              data: Array<{
+                  id: number
+                  type: string
+                  tags: string[]
+                  totalPages: number
+                  createdAt: Date
+                  updatedAt: Date
+                  totalTasks: number
+              }>
+          }
+        | number
+    > {
+        try {
+            let queryStr = `
       SELECT
       COUNT(*) OVER () AS total_records,
       q.id AS queue_id,
@@ -809,140 +843,146 @@ export class QueryManager {
       tasks t ON q.id = t.queue_id
     `
 
-      const queryParams: any[] = []
+            const queryParams: any[] = []
 
-      if (query.search) {
-        const searchTerm = `%${query.search.trim().toLowerCase()}%`
+            if (query.search) {
+                const searchTerm = `%${query.search.trim().toLowerCase()}%`
 
-        queryStr += `
+                queryStr += `
           WHERE
             LOWER(q.type) LIKE $1
             OR LOWER(q.tags::text) LIKE $1
         `
 
-        queryParams.push(searchTerm)
-      }
+                queryParams.push(searchTerm)
+            }
 
-      if (query.tag) {
-        const tagTerm = query.tag.trim()
+            if (query.tag) {
+                const tagTerm = query.tag.trim()
 
-        queryStr += `
+                queryStr += `
           WHERE
              $1 = ANY(q.tags)
         `
 
-        queryParams.push(tagTerm)
-      }
+                queryParams.push(tagTerm)
+            }
 
-      if (query.sortBy && query.sortOrder) {
-        const validSortByFields = [
-          "id",
-          "type",
-          "tags",
-          "created_at",
-          "updated_at",
-        ]
+            if (query.sortBy && query.sortOrder) {
+                const validSortByFields = [
+                    "id",
+                    "type",
+                    "tags",
+                    "created_at",
+                    "updated_at",
+                ]
 
-        if (validSortByFields.includes(query.sortBy)) {
-          if (query.sortBy === "created_at" || query.sortBy === "updated_at") {
-            queryStr += `
+                if (validSortByFields.includes(query.sortBy)) {
+                    if (
+                        query.sortBy === "created_at" ||
+                        query.sortBy === "updated_at"
+                    ) {
+                        queryStr += `
               GROUP BY
                 q.id, q.type, q.info->>'created_at', q.info->>'updated_at'
               ORDER BY
                 q.info->>'${query.sortBy}' ${query.sortOrder.toUpperCase()}
             `
-          } else {
-            queryStr += `
+                    } else {
+                        queryStr += `
               GROUP BY
                 q.id, q.type, q.info->>'created_at', q.info->>'updated_at'
               ORDER BY
                 q.${query.sortBy} ${query.sortOrder.toUpperCase()}
             `
-          }
-        }
-      } else {
-        queryStr += `
+                    }
+                }
+            } else {
+                queryStr += `
           GROUP BY
             q.id, q.type, q.info->>'created_at', q.info->>'updated_at'
           ORDER BY
             MAX(q.info->>'updated_at') DESC
         `
-      }
+            }
 
-      const preResult: QueryResult = await this.client.query(
-        queryStr,
-        queryParams
-      )
+            const preResult: QueryResult = await this.client.query(
+                queryStr,
+                queryParams
+            )
 
-      const totalRecords = preResult.rows[0].total_records ?? 0
+            const totalRecords = preResult.rows[0].total_records ?? 0
 
-      const pageSize = parseInt(query.pageSize) || 10
-      const totalPages = Math.ceil(totalRecords / pageSize)
-      const page = parseInt(query.page) || 1
-      const offset = parseInt(query.offset) || (page - 1) * pageSize
-      const limit = parseInt(query.limit) || pageSize
+            const pageSize = parseInt(query.pageSize) || 10
+            const totalPages = Math.ceil(totalRecords / pageSize)
+            const page = parseInt(query.page) || 1
+            const offset = parseInt(query.offset) || (page - 1) * pageSize
+            const limit = parseInt(query.limit) || pageSize
 
-      queryParams.push(limit, offset)
+            queryParams.push(limit, offset)
 
-      queryStr += ` LIMIT $${queryParams.length - 1} OFFSET $${
-        queryParams.length
-      }`
+            queryStr += ` LIMIT $${queryParams.length - 1} OFFSET $${
+                queryParams.length
+            }`
 
-      const result: QueryResult = await this.client.query(queryStr, queryParams)
+            const result: QueryResult = await this.client.query(
+                queryStr,
+                queryParams
+            )
 
-      const queuesDetails: Array<{
-        id: number
-        type: string
-        tags: string[]
-        totalPages: number
-        createdAt: Date
-        updatedAt: Date
-        totalTasks: number
-      }> = result.rows.map(row => ({
-        id: row.queue_id,
-        type: row.queue_type,
-        tags: row.tags,
-        totalPages: row.total_pages,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        totalTasks: row.total_tasks,
-      }))
+            const queuesDetails: Array<{
+                id: number
+                type: string
+                tags: string[]
+                totalPages: number
+                createdAt: Date
+                updatedAt: Date
+                totalTasks: number
+            }> = result.rows.map(row => ({
+                id: row.queue_id,
+                type: row.queue_type,
+                tags: row.tags,
+                totalPages: row.total_pages,
+                createdAt: row.created_at,
+                updatedAt: row.updated_at,
+                totalTasks: row.total_tasks,
+            }))
 
-      return {
-        total_pages: totalPages,
-        data: queuesDetails,
-      }
-    } catch (err) {
-      console.error("Error in allQueueDetails:", err)
-      return 0
+            return {
+                total_pages: totalPages,
+                data: queuesDetails,
+            }
+        } catch (err) {
+            console.error("Error in allQueueDetails:", err)
+            return 0
+        }
     }
-  }
 
-  /**
-   * Returns the details of a specific queue.
-   * @returns {object} The details of the queue.
-   */
-  async getQueueDetails(
-    queue: string | number,
-    query: Record<string, any>
-  ): Promise<
-    | {
-        queue_id: string | number
-        tags: []
-        options: { callback: string; expiryTime: string }
-        created_at: string
-        updated_at: string
-        notes: string
-        tasks: []
-        total_tasks: number | string
-        completed_tasks: number | string
-        error_tasks: string
-        processing_tasks: string
-      }
-    | number
-  > {
-    try {
-      let queryStr: string = `
+    /**
+     * Returns the details of a specific queue.
+     * @returns {object} The details of the queue.
+     */
+    async getQueueDetails(
+        queue: string | number,
+        query: Record<string, any>
+    ): Promise<
+        | {
+              queue_id: string | number
+              tags: []
+              options: { callback: string; expiryTime: string }
+              created_at: string
+              updated_at: string
+              notes: string
+              tasks: []
+              total_tasks: number | string
+              completed_tasks: number | string
+              error_tasks: string
+              processing_tasks: string
+          }
+        | number
+    > {
+        try {
+            let queryStr: string = `
       SELECT
         q.id AS queue_id,
         q.type,
@@ -991,81 +1031,86 @@ export class QueryManager {
 
     `
 
-      if (query.status) {
-        queryStr += " AND t.status = $2"
-      }
+            if (query.status) {
+                queryStr += " AND t.status = $2"
+            }
 
-      queryStr += `
+            queryStr += `
       GROUP BY
         q.id, q.type, q.tags, q.options, q.info, q.notes
       ORDER BY
         q.id
     `
 
-      const parameters = query.status ? [Number(queue), query?.status] : [queue]
+            const parameters = query.status
+                ? [Number(queue), query?.status]
+                : [queue]
 
-      const result: QueryResult = await this.client.query(queryStr, parameters)
+            const result: QueryResult = await this.client.query(
+                queryStr,
+                parameters
+            )
 
-      const queryResult: {
-        queue_id: ""
-        tags: []
-        options: { callback: ""; expiryTime: "" }
-        created_at: ""
-        updated_at: ""
-        notes: ""
-        tasks: []
-        total_tasks: ""
-        completed_tasks: ""
-        error_tasks: ""
-        processing_tasks: ""
-      } = {
-        queue_id: result.rows[0]?.queue_id,
-        tags: result.rows[0]?.tags,
-        options: result.rows[0]?.options,
-        created_at: result.rows[0]?.created_at,
-        updated_at: result.rows[0]?.updated_at,
-        notes: result.rows[0]?.notes,
-        tasks: result.rows[0]?.tasks,
-        total_tasks: result.rows[0]?.total_tasks,
-        completed_tasks: result.rows[0]?.completed_tasks,
-        error_tasks: result.rows[0]?.error_tasks,
-        processing_tasks: result.rows[0]?.processing_tasks,
-      }
+            const queryResult: {
+                queue_id: ""
+                tags: []
+                options: { callback: ""; expiryTime: "" }
+                created_at: ""
+                updated_at: ""
+                notes: ""
+                tasks: []
+                total_tasks: ""
+                completed_tasks: ""
+                error_tasks: ""
+                processing_tasks: ""
+            } = {
+                queue_id: result.rows[0]?.queue_id,
+                tags: result.rows[0]?.tags,
+                options: result.rows[0]?.options,
+                created_at: result.rows[0]?.created_at,
+                updated_at: result.rows[0]?.updated_at,
+                notes: result.rows[0]?.notes,
+                tasks: result.rows[0]?.tasks,
+                total_tasks: result.rows[0]?.total_tasks,
+                completed_tasks: result.rows[0]?.completed_tasks,
+                error_tasks: result.rows[0]?.error_tasks,
+                processing_tasks: result.rows[0]?.processing_tasks,
+            }
 
-      return queryResult
-    } catch (err) {
-      console.error("Error in getRecentQueues:", err)
-      return 0
+            return queryResult
+        } catch (err) {
+            console.error("Error in getRecentQueues:", err)
+            return 0
+        }
     }
-  }
 
-  //
-  ///
-  ///
-  //
-  ///
-  //
-  //
-  //
-  //
-  //
-  //
-  ///
-  //
-  //
-  ///
-  //
-  //
-  async queueAndTasksCounts(): Promise<
-    | {
-        total_tasks: string
-        pending_tasks: string
-        ongoing_queues: number[]
-      }
-    | number
-  > {
-    try {
-      const queryStr: string = `
+    //
+    ///
+    ///
+    //
+    ///
+    //
+    //
+    //
+    //
+    //
+    //
+    ///
+    //
+    //
+    ///
+    //
+    //
+    async queueAndTasksCounts(): Promise<
+        | {
+              total_tasks: string
+              pending_tasks: string
+              ongoing_queues: number[]
+          }
+        | number
+    > {
+        try {
+            const queryStr: string = `
       SELECT
       (SELECT COUNT(id) FROM tasks) AS total_tasks,
       (SELECT COUNT(id)
@@ -1083,39 +1128,39 @@ export class QueryManager {
     
     `
 
-      const result: QueryResult = await this.client.query(queryStr)
+            const result: QueryResult = await this.client.query(queryStr)
 
-      const queuesResult: {
-        total_tasks: ""
-        pending_tasks: ""
-        ongoing_queues: number[]
-      } = {
-        total_tasks: result.rows[0].total_tasks ?? 0,
-        pending_tasks: result.rows[0].pending_tasks ?? 0,
-        ongoing_queues: result.rows[0].ongoing_queues ?? [],
-      }
+            const queuesResult: {
+                total_tasks: ""
+                pending_tasks: ""
+                ongoing_queues: number[]
+            } = {
+                total_tasks: result.rows[0].total_tasks ?? 0,
+                pending_tasks: result.rows[0].pending_tasks ?? 0,
+                ongoing_queues: result.rows[0].ongoing_queues ?? [],
+            }
 
-      return queuesResult
-    } catch (err) {
-      console.error("Error in queueCounts:", err)
-      return 0
+            return queuesResult
+        } catch (err) {
+            console.error("Error in queueCounts:", err)
+            return 0
+        }
     }
-  }
 
-  async TasksDetailsOfQueues(queues: number[]): Promise<
-    | Array<{
-        id: number
-        type: string
-        totalTasks: number
-        availableTasks: number
-        processingTasks: number
-        completedTasks: number
-        errorTasks: number
-      }>
-    | number
-  > {
-    try {
-      const queryStr: string = `
+    async TasksDetailsOfQueues(queues: number[]): Promise<
+        | Array<{
+              id: number
+              type: string
+              totalTasks: number
+              availableTasks: number
+              processingTasks: number
+              completedTasks: number
+              errorTasks: number
+          }>
+        | number
+    > {
+        try {
+            const queryStr: string = `
 
       WITH QueueTasks AS (
         SELECT
@@ -1148,48 +1193,50 @@ export class QueryManager {
         QueueTasks qt;
       
     `
-      const result: QueryResult = await this.client.query(queryStr, [queues])
+            const result: QueryResult = await this.client.query(queryStr, [
+                queues,
+            ])
 
-      if (result.rows.length > 0) {
-        const queuesDetails: Array<{
-          id: number
-          type: string
-          totalTasks: number
-          availableTasks: number
-          processingTasks: number
-          completedTasks: number
-          errorTasks: number
-        }> = result.rows.map((row: any) => {
-          const queueDetails = row.queue_details
-          return {
-            id: queueDetails.queue_id,
-            type: queueDetails.queue_type,
-            totalTasks: queueDetails.total_tasks,
-            availableTasks: queueDetails.available_tasks,
-            processingTasks: queueDetails.processing_tasks,
-            completedTasks: queueDetails.completed_or_error_tasks,
-            errorTasks: queueDetails.error_tasks,
-          }
-        })
+            if (result.rows.length > 0) {
+                const queuesDetails: Array<{
+                    id: number
+                    type: string
+                    totalTasks: number
+                    availableTasks: number
+                    processingTasks: number
+                    completedTasks: number
+                    errorTasks: number
+                }> = result.rows.map((row: any) => {
+                    const queueDetails = row.queue_details
+                    return {
+                        id: queueDetails.queue_id,
+                        type: queueDetails.queue_type,
+                        totalTasks: queueDetails.total_tasks,
+                        availableTasks: queueDetails.available_tasks,
+                        processingTasks: queueDetails.processing_tasks,
+                        completedTasks: queueDetails.completed_or_error_tasks,
+                        errorTasks: queueDetails.error_tasks,
+                    }
+                })
 
-        return queuesDetails
-      } else {
-        return []
-      }
-    } catch (err) {
-      console.error("Error in TasksDetailsOfQueues:", err)
-      return []
+                return queuesDetails
+            } else {
+                return []
+            }
+        } catch (err) {
+            console.error("Error in TasksDetailsOfQueues:", err)
+            return []
+        }
     }
-  }
 
-  async completedQueues(): Promise<
-    | {
-        completed_queues: (string | number)[]
-      }
-    | []
-  > {
-    try {
-      const queryStr: string = `
+    async completedQueues(): Promise<
+        | {
+              completed_queues: (string | number)[]
+          }
+        | []
+    > {
+        try {
+            const queryStr: string = `
 
       SELECT ARRAY(
         SELECT DISTINCT q.id
@@ -1202,27 +1249,27 @@ export class QueryManager {
         )
       ) AS completed_queue_ids;     
    `
-      const result: QueryResult = await this.client.query(queryStr)
+            const result: QueryResult = await this.client.query(queryStr)
 
-      const queuesResult: {
-        completed_queues: (string | number)[]
-      } = {
-        completed_queues: result.rows[0].completed_queue_ids ?? [],
-      }
+            const queuesResult: {
+                completed_queues: (string | number)[]
+            } = {
+                completed_queues: result.rows[0].completed_queue_ids ?? [],
+            }
 
-      return queuesResult
-    } catch (err) {
-      console.error("Error in completedQueues:", err)
-      return []
+            return queuesResult
+        } catch (err) {
+            console.error("Error in completedQueues:", err)
+            return []
+        }
     }
-  }
 
-  async TaskDetailsOfQueue(
-    queue: number,
-    query: Record<string, any>
-  ): Promise<any> {
-    try {
-      let queryStr: string = `
+    async TaskDetailsOfQueue(
+        queue: number,
+        query: Record<string, any>
+    ): Promise<any> {
+        try {
+            let queryStr: string = `
 
       SELECT *
       FROM tasks
@@ -1230,24 +1277,26 @@ export class QueryManager {
     
  `
 
-      if (query.viewAll === "true") {
-        queryStr = queryStr.replace("LIMIT 10", "")
-      } else {
-        queryStr += "LIMIT 10"
-      }
-      const result: QueryResult = await this.client.query(queryStr, [queue])
+            if (query.viewAll === "true") {
+                queryStr = queryStr.replace("LIMIT 10", "")
+            } else {
+                queryStr += "LIMIT 10"
+            }
+            const result: QueryResult = await this.client.query(queryStr, [
+                queue,
+            ])
 
-      const queuesResult = result.rows
-      return queuesResult
-    } catch (err) {
-      console.error("Error in completedQueues:", err)
-      return []
+            const queuesResult = result.rows
+            return queuesResult
+        } catch (err) {
+            console.error("Error in completedQueues:", err)
+            return []
+        }
     }
-  }
 
-  async TasksCompletedWithinAnHour(): Promise<any> {
-    try {
-      let queryStr: string = `
+    async TasksCompletedWithinAnHour(): Promise<any> {
+        try {
+            let queryStr: string = `
 
       SELECT COUNT(*)
       FROM tasks
@@ -1255,20 +1304,20 @@ export class QueryManager {
       
  `
 
-      const result: QueryResult = await this.client.query(queryStr)
+            const result: QueryResult = await this.client.query(queryStr)
 
-      const queuesResult = result.rows
+            const queuesResult = result.rows
 
-      return queuesResult
-    } catch (err) {
-      console.error("Error in completedQueues:", err)
-      return []
+            return queuesResult
+        } catch (err) {
+            console.error("Error in completedQueues:", err)
+            return []
+        }
     }
-  }
 
-  async getParamAndResult(taskId: string | number): Promise<any> {
-    try {
-      let queryStr: string = `
+    async getParamAndResult(taskId: string | number): Promise<any> {
+        try {
+            let queryStr: string = `
 
       SELECT params, result
       FROM tasks
@@ -1276,14 +1325,16 @@ export class QueryManager {
       LIMIT 1;
  `
 
-      const result: QueryResult = await this.client.query(queryStr, [taskId])
+            const result: QueryResult = await this.client.query(queryStr, [
+                taskId,
+            ])
 
-      const queuesResult = result.rows
+            const queuesResult = result.rows
 
-      return queuesResult
-    } catch (err) {
-      console.error("Error in completedQueues:", err)
-      return []
+            return queuesResult
+        } catch (err) {
+            console.error("Error in completedQueues:", err)
+            return []
+        }
     }
-  }
 }
