@@ -3,6 +3,7 @@ node_modules/
 .prettierrc
 .env
 dist/
+tests/
 logs/
 TODO.MD
 dashboard/.eslintrc.cjs
