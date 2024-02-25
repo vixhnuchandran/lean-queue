@@ -5,7 +5,7 @@ dotenv.config()
 
 const connectionString: string = process.env.POSTGRES_URL!
 const pool: Pool = new Pool({
-  connectionString,
+    connectionString,
 })
 
 pool.on("connect", () => {})
@@ -13,15 +13,15 @@ pool.on("connect", () => {})
 pool.on("error", err => {})
 
 async function deleteEverything() {
-  try {
-    await pool.query("TRUNCATE TABLE tasks, queues RESTART IDENTITY")
+    try {
+        await pool.query("TRUNCATE TABLE tasks, queues RESTART IDENTITY")
 
-    console.log("Done")
+        console.log("Done")
 
-    return
-  } catch (error) {
-    console.log(error)
-  }
+        return
+    } catch (error) {
+        console.log(error)
+    }
 }
 
 export default deleteEverything
