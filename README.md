@@ -18,27 +18,32 @@ LeanQueue is a Node.js application designed to manage task queues. It uses Expre
 
 -   [Node.js](https://nodejs.org/)
 -   [Typescript](https://www.typescriptlang.org/)
--   [Jest](https://jestjs.io/)
 -   [PostgreSQL](https://www.postgresql.org/)
 
 ## Installation
 
-1. Clone the repository:
+1.  Clone the repository:
 
     ```bash
     git clone git@github.com:vixhnuchandran/lean-queue.git
     ```
 
-2. Navigate to the project directory:
+2.  Navigate to the project directory:
 
     ```bash
     cd lean-queue
     ```
 
-3. Install dependencies:
+3.  Install dependencies:
 
     ```bash
     pnpm install
+    ```
+
+4.  Set up environment variables (.env):
+
+    ```
+    POSTGRES_URL=your_postgres_connection_url
     ```
 
 ## Usage
