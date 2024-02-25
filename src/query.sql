@@ -14,13 +14,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   id SERIAL PRIMARY KEY,
   task_id VARCHAR(255) NOT NULL,
   params JSONB NOT NULL,
-  priority INT DEFAULT 5,
+  priority INT NOT NULL DEFAULT 5,
   status task_status DEFAULT 'available',
   result JSONB DEFAULT NULL,
   start_time TIMESTAMP DEFAULT NULL,
   end_time TIMESTAMP DEFAULT NULL,
   expiry_time TIMESTAMP DEFAULT NULL,
-  info JSONB DEFAULT '{"added_at": "' || NOW()::TEXT || '"}'::JSONB,
+  info JSONB NOT NULL,
   queue_id INTEGER REFERENCES queues(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
