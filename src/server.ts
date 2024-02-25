@@ -19,7 +19,13 @@ try {
 
   const PORT = 8484
 
-  httpsServer.listen(PORT, () => {
+  // HTTPS SERVER
+  // httpsServer.listen(PORT, () => {
+  //   console.log(`Server listening on port ${PORT}`)
+  // })
+  
+  // HTTP SERVER
+  app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`)
   })
 } catch (error) {
