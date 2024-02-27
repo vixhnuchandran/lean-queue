@@ -324,8 +324,12 @@ const submitResults = async (
     })
 
     try {
-        const { id, result, error }: { id: number; result: {}; error: {} } =
-            req.body
+        const {
+            id,
+            result,
+            error,
+            worker,
+        }: { id: number; result: {}; error: {}; worker: {} } = req.body
         if (!req.queryManager) {
             throw new QueueError(
                 "QueryManager is not defined",
@@ -336,7 +340,8 @@ const submitResults = async (
         const resultData = await req.queryManager.submitResults(
             id,
             result,
-            error
+            error,
+            worker
         )
 
         if (resultData) {
