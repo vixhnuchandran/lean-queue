@@ -352,7 +352,8 @@ export class QueryManager {
     async submitResults(
         id: number,
         result: {},
-        error: {}
+        error: {},
+        worker: {}
     ): Promise<SubmitResultsResponse | null> {
         try {
             const resultObj: {} = error ? { error } : { result }
@@ -370,12 +371,19 @@ export class QueryManager {
           RETURNING tasks.queue_id, queues.options->>'callback' AS callback_url;
         `
             const queryStr2: string = `
-      UPDATE queues
-      SET info = jsonb_set(info, '{updated_at}', to_jsonb(EXTRACT(EPOCH FROM NOW()) * 1000)::text::jsonb, true)
-      WHERE id = $1;
-      
-      
-      `
+        UPDATE queues
+        SET info = jsonb_set(info, '{updated_at}', to_jsonb(EXTRACT(EPOCH FROM NOW()) * 1000)::text::jsonb, true)
+        WHERE id = $1;`
+
+            const queryStr3: string = `
+        UPDATE tasks
+        SET info = jsonb_set(
+                    info,
+                    '{worker}',
+                    $1,
+                    true
+                );
+        `
             await this.client.query("BEGIN")
 
             const response: QueryResult = await this.client.query(queryStr, [
@@ -387,6 +395,7 @@ export class QueryManager {
             const queue: number = response.rows[0].queue_id
 
             await this.client.query(queryStr2, [queue])
+            await this.client.query(queryStr3, [worker])
 
             const callbackUrl: string = response.rows[0].callback_url
 
